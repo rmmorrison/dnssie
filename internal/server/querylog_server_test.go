@@ -29,12 +29,8 @@ func waitForLog(t *testing.T, dir, want string) {
 }
 
 func TestServerLogsLocalAndForwarded(t *testing.T) {
-	xdg := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", xdg)
-	dir := filepath.Join(xdg, "dnssie")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
+	t.Setenv("DNSSIE_CONFIG_DIR", dir)
 
 	if err := store.New(dir).Save([]store.Record{
 		{Type: "A", Name: "local.test.", Value: "1.2.3.4"},
@@ -67,12 +63,8 @@ func TestServerLogsLocalAndForwarded(t *testing.T) {
 }
 
 func TestServerLogsServfail(t *testing.T) {
-	xdg := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", xdg)
-	dir := filepath.Join(xdg, "dnssie")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
+	t.Setenv("DNSSIE_CONFIG_DIR", dir)
 	// Manual mode with no upstreams -> unmatched queries SERVFAIL.
 	if err := config.New(dir).Save(config.Config{
 		Port:      5353,
@@ -92,12 +84,8 @@ func TestServerLogsServfail(t *testing.T) {
 }
 
 func TestServerResetsLogOnStart(t *testing.T) {
-	xdg := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", xdg)
-	dir := filepath.Join(xdg, "dnssie")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
+	t.Setenv("DNSSIE_CONFIG_DIR", dir)
 	// A leftover log from a previous run.
 	if err := os.WriteFile(filepath.Join(dir, "queries.log"), []byte("STALE ENTRY\n"), 0o644); err != nil {
 		t.Fatal(err)

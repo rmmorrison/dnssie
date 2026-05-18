@@ -9,12 +9,8 @@ import (
 
 func writeQueryLog(t *testing.T, body string) {
 	t.Helper()
-	xdg := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", xdg)
-	dir := filepath.Join(xdg, "dnssie")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
+	t.Setenv("DNSSIE_CONFIG_DIR", dir)
 	if body != "" {
 		if err := os.WriteFile(filepath.Join(dir, queryLogFile), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
@@ -23,7 +19,7 @@ func writeQueryLog(t *testing.T, body string) {
 }
 
 func TestRecentQueriesMissingFile(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("DNSSIE_CONFIG_DIR", t.TempDir())
 	got, err := RecentQueries(10)
 	if err != nil || got != nil {
 		t.Errorf("RecentQueries() = (%v, %v), want (nil, nil)", got, err)

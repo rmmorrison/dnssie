@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ import (
 )
 
 func TestStaleStateIsCleaned(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("DNSSIE_CONFIG_DIR", t.TempDir())
 	if err := writeState(State{PID: 1 << 30, Addr: "127.0.0.1:5353", Port: 5353, Started: time.Now()}); err != nil {
 		t.Fatalf("writeState: %v", err)
 	}
@@ -35,7 +36,7 @@ func TestStaleStateIsCleaned(t *testing.T) {
 }
 
 func TestStatusNoStateFile(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("DNSSIE_CONFIG_DIR", t.TempDir())
 	running, _, err := Status()
 	if err != nil || running {
 		t.Errorf("Status() = (%v, err=%v), want (false, nil)", running, err)
@@ -67,6 +68,9 @@ func TestLifecycle(t *testing.T) {
 	}
 
 	bin := filepath.Join(t.TempDir(), "dnssie")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // Windows won't exec a file without a known extension
+	}
 	build := exec.Command("go", "build", "-o", bin, "./cmd/dnssie")
 	build.Dir = moduleRoot(t)
 	if out, err := build.CombinedOutput(); err != nil {
@@ -76,12 +80,8 @@ func TestLifecycle(t *testing.T) {
 	osExecutable = func() (string, error) { return bin, nil }
 	t.Cleanup(func() { osExecutable = old })
 
-	xdg := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", xdg)
-	cfgDir := filepath.Join(xdg, "dnssie")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	cfgDir := t.TempDir()
+	t.Setenv("DNSSIE_CONFIG_DIR", cfgDir)
 
 	port := freePort(t)
 	if err := store.New(cfgDir).Save([]store.Record{

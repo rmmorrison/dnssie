@@ -7,13 +7,21 @@ import (
 	"runtime"
 )
 
-// ConfigDir resolves dnssie's configuration directory per platform:
+// ConfigDir resolves dnssie's configuration directory:
 //
+//	$DNSSIE_CONFIG_DIR           (exact path, any platform; highest precedence)
 //	Linux/macOS: ~/.config/dnssie   (honoring $XDG_CONFIG_HOME)
 //	Windows:     %AppData%\dnssie
 //
 // It does not create the directory.
 func ConfigDir() (string, error) {
+	// An explicit override wins everywhere. This both lets users relocate
+	// their config and gives tests a single, OS-independent isolation knob
+	// (XDG_CONFIG_HOME is ignored on Windows).
+	if dir := os.Getenv("DNSSIE_CONFIG_DIR"); dir != "" {
+		return dir, nil
+	}
+
 	if runtime.GOOS == "windows" {
 		base, err := os.UserConfigDir() // %AppData%
 		if err != nil {

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -38,6 +39,13 @@ func startStubUpstream(t *testing.T, ip string) string {
 // address.
 func runServer(t *testing.T, recDir, cfgDir string) string {
 	t.Helper()
+	// server.New derives the query-log path from paths.ConfigDir(); isolate it
+	// so tests never touch the real user config dir (and work on Windows,
+	// where XDG_CONFIG_HOME is ignored). A test that needs to inspect the log
+	// sets DNSSIE_CONFIG_DIR itself first; don't clobber that.
+	if os.Getenv("DNSSIE_CONFIG_DIR") == "" {
+		t.Setenv("DNSSIE_CONFIG_DIR", t.TempDir())
+	}
 	srv, err := New(Options{
 		Port:    0,
 		Records: store.New(recDir),
