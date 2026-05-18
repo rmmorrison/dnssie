@@ -9,8 +9,8 @@ import (
 
 func TestDefaults(t *testing.T) {
 	d := Defaults()
-	if d.Port != 5353 {
-		t.Errorf("default port = %d, want 5353", d.Port)
+	if d.Port != 1053 {
+		t.Errorf("default port = %d, want 1053", d.Port)
 	}
 	if d.Resolvers.Mode != ModeSystem {
 		t.Errorf("default mode = %q, want %q", d.Resolvers.Mode, ModeSystem)

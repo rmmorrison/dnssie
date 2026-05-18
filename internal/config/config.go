@@ -31,9 +31,10 @@ const (
 	// ModeManual forwards unmatched queries to Resolvers.Upstream.
 	ModeManual = "manual"
 
-	// defaultPort is unprivileged so dnssie runs without root/admin. Users
-	// who can bind 53 (the standard DNS port) may set it in the UI.
-	defaultPort = 5353
+	// defaultPort is unprivileged so dnssie runs without root/admin. It
+	// avoids 5353, which collides with mDNS/Bonjour (mDNSResponder on
+	// macOS, avahi on Linux). Users who can bind 53 may set it in the UI.
+	defaultPort = 1053
 	// defaultDNS is the standard DNS port, assumed for upstream resolvers
 	// that don't specify one.
 	defaultDNS = "53"

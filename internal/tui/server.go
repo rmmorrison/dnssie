@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/rmmorrison/dnssie/internal/config"
+	"github.com/rmmorrison/dnssie/internal/supervisor"
 )
 
 // configLoadedMsg carries the result of reading the server config from disk.
@@ -57,6 +59,38 @@ func saveConfigCmd(cfg config.Config) tea.Cmd {
 	}
 }
 
+// serverStatusMsg carries the detached server's current status.
+type serverStatusMsg struct {
+	running bool
+	info    supervisor.Info
+	err     error
+}
+
+// serverActionMsg reports the result of a start/stop request.
+type serverActionMsg struct{ err error }
+
+// statusTickMsg drives periodic status polling while the screen is open.
+type statusTickMsg struct{}
+
+func serverStatusCmd() tea.Cmd {
+	return func() tea.Msg {
+		running, info, err := supervisor.Status()
+		return serverStatusMsg{running: running, info: info, err: err}
+	}
+}
+
+func startServerCmd(cfg config.Config) tea.Cmd {
+	return func() tea.Msg { return serverActionMsg{err: supervisor.Start(cfg)} }
+}
+
+func stopServerCmd() tea.Cmd {
+	return func() tea.Msg { return serverActionMsg{err: supervisor.Stop()} }
+}
+
+func statusTickCmd() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return statusTickMsg{} })
+}
+
 type serverStep int
 
 const (
@@ -89,8 +123,15 @@ type server struct {
 	loadErr    error
 	opErr      error
 	editErr    error // transient validation error in an edit step
-	width      int
-	height     int
+
+	running   bool
+	srvInfo   supervisor.Info
+	statusErr error
+	busy      bool  // a start/stop request is in flight
+	actionErr error // last start/stop failure
+
+	width  int
+	height int
 }
 
 func newServer() server {
@@ -100,7 +141,8 @@ func newServer() server {
 }
 
 func (m server) Init() tea.Cmd {
-	return tea.Batch(loadConfigCmd(), systemResolversCmd())
+	return tea.Batch(loadConfigCmd(), systemResolversCmd(),
+		serverStatusCmd(), statusTickCmd())
 }
 
 func (m server) manual() bool {
@@ -172,6 +214,27 @@ func (m server) Update(msg tea.Msg) (server, tea.Cmd) {
 		m.step = serverLoading
 		return m, loadConfigCmd()
 
+	case serverStatusMsg:
+		m.running = msg.running
+		m.srvInfo = msg.info
+		m.statusErr = msg.err
+		m.busy = false
+		return m, nil
+
+	case serverActionMsg:
+		m.busy = false
+		m.actionErr = msg.err
+		return m, serverStatusCmd() // refresh immediately
+
+	case statusTickMsg:
+		// Keep the heartbeat alive across all steps; only probe while
+		// browsing and idle to avoid redundant work.
+		cmds := []tea.Cmd{statusTickCmd()}
+		if m.step == serverBrowsing && !m.busy {
+			cmds = append(cmds, serverStatusCmd())
+		}
+		return m, tea.Batch(cmds...)
+
 	case tea.KeyPressMsg:
 		switch m.step {
 		case serverBrowsing:
@@ -231,6 +294,16 @@ func (m server) updateBrowsing(msg tea.KeyPressMsg) (server, tea.Cmd) {
 			m.step = serverConfirmDelete
 			return m, nil
 		}
+	case "s":
+		if m.busy {
+			return m, nil
+		}
+		m.busy = true
+		m.actionErr = nil
+		if m.running {
+			return m, stopServerCmd()
+		}
+		return m, startServerCmd(m.cfg)
 	case "enter":
 		switch {
 		case m.cursor == focusPort:
@@ -352,7 +425,7 @@ func (m server) updateConfirmDelete(msg tea.KeyPressMsg) (server, tea.Cmd) {
 
 func (m server) View() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("DNS server settings"))
+	b.WriteString(titleStyle.Render("DNS server"))
 	b.WriteString("\n\n")
 
 	switch m.step {
@@ -410,6 +483,37 @@ func (m server) View() string {
 		b.WriteString("\n\n")
 	}
 
+	// Server status + start/stop control.
+	switch {
+	case m.statusErr != nil:
+		b.WriteString(errorStyle.Render("Status unavailable: " + m.statusErr.Error()))
+		b.WriteByte('\n')
+	case m.running:
+		b.WriteString(statusStyle.Render("● running") + "  " + m.srvInfo.Addr + "\n")
+		if !m.srvInfo.Started.IsZero() {
+			b.WriteString(subtitleStyle.Render("  started "+
+				m.srvInfo.Started.Format("2006-01-02 15:04:05")) + "\n")
+		}
+	default:
+		b.WriteString(subtitleStyle.Render("○ stopped") + "\n")
+	}
+	if m.busy {
+		b.WriteString(subtitleStyle.Render("  working…") + "\n")
+	}
+	if m.actionErr != nil {
+		b.WriteString(errorStyle.Render("  "+m.actionErr.Error()) + "\n")
+	}
+	if m.running && m.srvInfo.Port != 0 && m.srvInfo.Port != m.cfg.Port {
+		b.WriteString(errorStyle.Render(fmt.Sprintf(
+			"  ⚠ restart required: running on :%d, config is :%d",
+			m.srvInfo.Port, m.cfg.Port)) + "\n")
+	}
+	act := "start"
+	if m.running {
+		act = "stop"
+	}
+	b.WriteString(itemStyle.Render(fmt.Sprintf("  [ s ] %s server", act)) + "\n\n")
+
 	source := "System"
 	if m.manual() {
 		source = "Manual"
@@ -431,7 +535,7 @@ func (m server) View() string {
 		}
 		b.WriteString(line(m.onAddRow(), subtitleStyle.Render("+ add resolver")))
 		b.WriteByte('\n')
-		b.WriteString(helpStyle.Render("↑/↓: navigate • enter: edit • a: add • d: delete • esc: back"))
+		b.WriteString(helpStyle.Render("↑/↓: navigate • enter: edit • a: add • d: delete • s: start/stop • esc: back"))
 	} else {
 		b.WriteString(groupStyle.Render("System resolvers"))
 		b.WriteByte('\n')
@@ -449,7 +553,7 @@ func (m server) View() string {
 			}
 		}
 		b.WriteByte('\n')
-		b.WriteString(helpStyle.Render("↑/↓: navigate • enter: edit • space: toggle source • esc: back"))
+		b.WriteString(helpStyle.Render("↑/↓: navigate • enter: edit • space: toggle source • s: start/stop • esc: back"))
 	}
 
 	return b.String()

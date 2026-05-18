@@ -13,7 +13,7 @@ type action int
 const (
 	actionCreateRecord action = iota
 	actionManageRecords
-	actionServerSettings
+	actionServer
 	actionQuit
 )
 
@@ -38,7 +38,7 @@ func newMenu() menu {
 		items: []menuItem{
 			{actionCreateRecord, "Create a new record", "Add a new DNS record"},
 			{actionManageRecords, "Manage existing records", "View, edit, or delete records"},
-			{actionServerSettings, "DNS server settings", "Configure the listening port and upstream resolvers"},
+			{actionServer, "DNS server", "Start/stop the server and configure port and resolvers"},
 			{actionQuit, "Quit", "Exit dnssie"},
 		},
 	}
@@ -81,7 +81,7 @@ func (m menu) Update(msg tea.Msg) (menu, tea.Cmd) {
 				return m, changeScreen(screenCreate)
 			case actionManageRecords:
 				return m, changeScreen(screenManage)
-			case actionServerSettings:
+			case actionServer:
 				return m, changeScreen(screenServer)
 			}
 		}
@@ -128,7 +128,7 @@ func (m menu) View() string {
 
 	b.WriteString(titleStyle.Render("dnssie"))
 	b.WriteByte('\n')
-	b.WriteString(subtitleStyle.Render("DNS record manager"))
+	b.WriteString(subtitleStyle.Render("dev-friendly DNS server"))
 	b.WriteString("\n\n")
 
 	for i, item := range m.items {
