@@ -5,7 +5,29 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
+
+	"github.com/rmmorrison/dnssie/internal/store"
 )
+
+// recordSavedMsg reports the outcome of persisting a record.
+type recordSavedMsg struct {
+	path string
+	err  error
+}
+
+// saveRecordCmd persists r to the default store off the UI goroutine.
+func saveRecordCmd(r store.Record) tea.Cmd {
+	return func() tea.Msg {
+		st, err := store.Default()
+		if err != nil {
+			return recordSavedMsg{err: err}
+		}
+		if err := st.Add(r); err != nil {
+			return recordSavedMsg{err: err}
+		}
+		return recordSavedMsg{path: st.Path()}
+	}
+}
 
 // recordType is a DNS record type the user can create, with an example shown
 // as placeholder text for the value input.
@@ -34,19 +56,22 @@ const (
 	stepChooseType createStep = iota
 	stepEnterName
 	stepEnterValue
+	stepSaving
 	stepDone
 )
 
 // createRecord is the screen for adding a new DNS record: pick a type, name
 // it, then enter the value. Persisting the record isn't wired up yet.
 type createRecord struct {
-	step   createStep
-	cursor int
-	chosen recordType
-	name   textinput.Model
-	value  textinput.Model
-	width  int
-	height int
+	step      createStep
+	cursor    int
+	chosen    recordType
+	name      textinput.Model
+	value     textinput.Model
+	savedPath string
+	saveErr   error
+	width     int
+	height    int
 }
 
 func newCreateRecord() createRecord {
@@ -78,6 +103,17 @@ func (m createRecord) Update(msg tea.Msg) (createRecord, tea.Cmd) {
 		m.value.SetWidth(w)
 		return m, nil
 
+	case recordSavedMsg:
+		if msg.err != nil {
+			// Surface the error and let the user retry from the value step.
+			m.saveErr = msg.err
+			m.step = stepEnterValue
+			return m, m.value.Focus()
+		}
+		m.savedPath = msg.path
+		m.step = stepDone
+		return m, nil
+
 	case tea.KeyPressMsg:
 		switch m.step {
 		case stepChooseType:
@@ -86,6 +122,11 @@ func (m createRecord) Update(msg tea.Msg) (createRecord, tea.Cmd) {
 			return m.updateEnterName(msg)
 		case stepEnterValue:
 			return m.updateEnterValue(msg)
+		case stepSaving:
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			return m, nil
 		case stepDone:
 			return m.updateDone(msg)
 		}
@@ -155,6 +196,7 @@ func (m createRecord) updateEnterValue(msg tea.KeyPressMsg) (createRecord, tea.C
 	case "esc":
 		// Go back to the name field.
 		m.value.Blur()
+		m.saveErr = nil
 		m.step = stepEnterName
 		return m, m.name.Focus()
 	case "enter":
@@ -162,8 +204,13 @@ func (m createRecord) updateEnterValue(msg tea.KeyPressMsg) (createRecord, tea.C
 			return m, nil
 		}
 		m.value.Blur()
-		m.step = stepDone
-		return m, nil
+		m.saveErr = nil
+		m.step = stepSaving
+		return m, saveRecordCmd(store.Record{
+			Type:  m.chosen.name,
+			Name:  strings.TrimSpace(m.name.Value()),
+			Value: m.value.Value(),
+		})
 	}
 
 	var cmd tea.Cmd
@@ -223,10 +270,17 @@ func (m createRecord) View() string {
 		b.WriteString("Value\n")
 		b.WriteString(m.value.View())
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("enter: continue • esc: change name"))
+		if m.saveErr != nil {
+			b.WriteString(errorStyle.Render("Save failed: " + m.saveErr.Error()))
+			b.WriteString("\n\n")
+		}
+		b.WriteString(helpStyle.Render("enter: save • esc: change name"))
+
+	case stepSaving:
+		b.WriteString(subtitleStyle.Render("Saving record…"))
 
 	case stepDone:
-		b.WriteString(statusStyle.Render("Record ready — saving coming soon"))
+		b.WriteString(statusStyle.Render("Record saved"))
 		b.WriteString("\n\n")
 		b.WriteString(subtitleStyle.Render("Type:  "))
 		b.WriteString(m.chosen.name)
@@ -236,6 +290,8 @@ func (m createRecord) View() string {
 		b.WriteByte('\n')
 		b.WriteString(subtitleStyle.Render("Value: "))
 		b.WriteString(m.value.Value())
+		b.WriteString("\n\n")
+		b.WriteString(subtitleStyle.Render("Stored in " + m.savedPath))
 		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("enter: back to menu"))
 	}

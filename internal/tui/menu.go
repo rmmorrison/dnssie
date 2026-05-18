@@ -115,6 +115,10 @@ var (
 			Italic(true).
 			Foreground(lipgloss.Color("#43BF6D"))
 
+	errorStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#E64545"))
+
 	helpStyle = lipgloss.NewStyle().
 			Faint(true)
 )

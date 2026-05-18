@@ -1,0 +1,135 @@
+// Package store persists dnssie's DNS records as TOML on disk.
+//
+// Records live in a single records.toml file inside dnssie's configuration
+// directory:
+//
+//	Linux/macOS: ~/.config/dnssie/records.toml   (honoring $XDG_CONFIG_HOME)
+//	Windows:     %AppData%\dnssie\records.toml
+//
+// The directory and file are created on the first save; a missing file is
+// treated as "no records yet" rather than an error.
+package store
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+
+	"github.com/BurntSushi/toml"
+)
+
+const recordsFile = "records.toml"
+
+// Record is a single DNS record managed by dnssie.
+type Record struct {
+	Type  string `toml:"type"`
+	Name  string `toml:"name"`
+	Value string `toml:"value"`
+}
+
+// document is the on-disk shape of records.toml.
+type document struct {
+	Records []Record `toml:"record"`
+}
+
+// Store reads and writes records under a configuration directory.
+type Store struct {
+	dir string
+}
+
+// New returns a Store rooted at the given directory. It's mainly useful for
+// tests; production code should use Default.
+func New(dir string) *Store {
+	return &Store{dir: dir}
+}
+
+// Default returns a Store rooted at dnssie's standard configuration directory.
+func Default() (*Store, error) {
+	dir, err := configDir()
+	if err != nil {
+		return nil, err
+	}
+	return &Store{dir: dir}, nil
+}
+
+// configDir resolves dnssie's configuration directory per platform.
+func configDir() (string, error) {
+	if runtime.GOOS == "windows" {
+		base, err := os.UserConfigDir() // %AppData%
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(base, "dnssie"), nil
+	}
+
+	// Linux and macOS: ~/.config/dnssie, honoring XDG_CONFIG_HOME.
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "dnssie"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "dnssie"), nil
+}
+
+// Path is the absolute path to the records file.
+func (s *Store) Path() string {
+	return filepath.Join(s.dir, recordsFile)
+}
+
+// Load returns all persisted records. A missing file yields no records and no
+// error, so callers can treat first run and "no records" the same way.
+func (s *Store) Load() ([]Record, error) {
+	var doc document
+	if _, err := toml.DecodeFile(s.Path(), &doc); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading %s: %w", s.Path(), err)
+	}
+	return doc.Records, nil
+}
+
+// Save writes records, creating the configuration directory and file if they
+// don't exist yet. The write is atomic: a temp file is written and then
+// renamed over the target so a crash can't leave a half-written file.
+func (s *Store) Save(records []Record) error {
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", s.dir, err)
+	}
+
+	data, err := toml.Marshal(document{Records: records})
+	if err != nil {
+		return fmt.Errorf("encoding records: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(s.dir, recordsFile+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once renamed
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing %s: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing %s: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, s.Path()); err != nil {
+		return fmt.Errorf("saving %s: %w", s.Path(), err)
+	}
+	return nil
+}
+
+// Add appends a record and persists the updated set.
+func (s *Store) Add(r Record) error {
+	records, err := s.Load()
+	if err != nil {
+		return err
+	}
+	return s.Save(append(records, r))
+}
