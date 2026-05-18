@@ -14,9 +14,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/rmmorrison/dnssie/internal/paths"
 )
 
 const recordsFile = "records.toml"
@@ -46,32 +47,11 @@ func New(dir string) *Store {
 
 // Default returns a Store rooted at dnssie's standard configuration directory.
 func Default() (*Store, error) {
-	dir, err := configDir()
+	dir, err := paths.ConfigDir()
 	if err != nil {
 		return nil, err
 	}
 	return &Store{dir: dir}, nil
-}
-
-// configDir resolves dnssie's configuration directory per platform.
-func configDir() (string, error) {
-	if runtime.GOOS == "windows" {
-		base, err := os.UserConfigDir() // %AppData%
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(base, "dnssie"), nil
-	}
-
-	// Linux and macOS: ~/.config/dnssie, honoring XDG_CONFIG_HOME.
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "dnssie"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "dnssie"), nil
 }
 
 // Path is the absolute path to the records file.

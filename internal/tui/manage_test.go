@@ -19,6 +19,12 @@ func key(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
 		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "space":
+		return tea.KeyPressMsg{Code: tea.KeySpace}
+	case "left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
+	case "right":
+		return tea.KeyPressMsg{Code: tea.KeyRight}
 	default: // single printable rune, e.g. "e", "d", "q"
 		r := []rune(s)[0]
 		return tea.KeyPressMsg{Code: r, Text: s}

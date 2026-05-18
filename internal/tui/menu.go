@@ -13,7 +13,7 @@ type action int
 const (
 	actionCreateRecord action = iota
 	actionManageRecords
-	actionServerStatus
+	actionServerSettings
 	actionQuit
 )
 
@@ -31,10 +31,6 @@ type menu struct {
 	cursor int
 	width  int
 	height int
-
-	// selected holds the most recent choice for screens that aren't built
-	// yet, so we can show a placeholder.
-	selected *menuItem
 }
 
 func newMenu() menu {
@@ -42,7 +38,7 @@ func newMenu() menu {
 		items: []menuItem{
 			{actionCreateRecord, "Create a new record", "Add a new DNS record"},
 			{actionManageRecords, "Manage existing records", "View, edit, or delete records"},
-			{actionServerStatus, "DNS server status", "Check whether the DNS server is running"},
+			{actionServerSettings, "DNS server settings", "Configure the listening port and upstream resolvers"},
 			{actionQuit, "Quit", "Exit dnssie"},
 		},
 	}
@@ -76,7 +72,7 @@ func (m menu) Update(msg tea.Msg) (menu, tea.Cmd) {
 			}
 			return m, nil
 
-		case "enter", " ":
+		case "enter", "space":
 			choice := m.items[m.cursor]
 			switch choice.action {
 			case actionQuit:
@@ -85,10 +81,8 @@ func (m menu) Update(msg tea.Msg) (menu, tea.Cmd) {
 				return m, changeScreen(screenCreate)
 			case actionManageRecords:
 				return m, changeScreen(screenManage)
-			default:
-				// These screens aren't built yet.
-				m.selected = &choice
-				return m, nil
+			case actionServerSettings:
+				return m, changeScreen(screenServer)
 			}
 		}
 	}
@@ -149,12 +143,6 @@ func (m menu) View() string {
 		b.WriteByte('\n')
 		b.WriteString("  ")
 		b.WriteString(descStyle.Render(item.desc))
-		b.WriteByte('\n')
-	}
-
-	if m.selected != nil {
-		b.WriteByte('\n')
-		b.WriteString(statusStyle.Render(m.selected.title + " — coming soon"))
 		b.WriteByte('\n')
 	}
 

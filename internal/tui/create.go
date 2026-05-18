@@ -164,7 +164,7 @@ func (m createRecord) updateChooseType(msg tea.KeyPressMsg) (createRecord, tea.C
 		if m.cursor < len(supportedTypes)-1 {
 			m.cursor++
 		}
-	case "enter", " ":
+	case "enter", "space":
 		m.chosen = supportedTypes[m.cursor]
 		m.value.Placeholder = m.chosen.hint
 		m.step = stepEnterName

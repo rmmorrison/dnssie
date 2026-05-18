@@ -12,6 +12,7 @@ const (
 	screenMenu screen = iota
 	screenCreate
 	screenManage
+	screenServer
 )
 
 // changeScreenMsg asks the app to switch to a different screen. Sub-models
@@ -31,6 +32,7 @@ type app struct {
 	menu   menu
 	create createRecord
 	manage manage
+	server server
 	width  int
 	height int
 }
@@ -41,6 +43,7 @@ func newApp() app {
 		menu:   newMenu(),
 		create: newCreateRecord(),
 		manage: newManage(),
+		server: newServer(),
 	}
 }
 
@@ -57,6 +60,7 @@ func (a app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.menu, _ = a.menu.Update(msg)
 		a.create, _ = a.create.Update(msg)
 		a.manage, _ = a.manage.Update(msg)
+		a.server, _ = a.server.Update(msg)
 		return a, nil
 
 	case changeScreenMsg:
@@ -72,6 +76,11 @@ func (a app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.manage = newManage()
 			a.manage, _ = a.manage.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
 			return a, a.manage.Init()
+		case screenServer:
+			// Reload config fresh on each visit.
+			a.server = newServer()
+			a.server, _ = a.server.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
+			return a, a.server.Init()
 		case screenMenu:
 			return a, a.menu.Init()
 		}
@@ -86,6 +95,8 @@ func (a app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.create, cmd = a.create.Update(msg)
 	case screenManage:
 		a.manage, cmd = a.manage.Update(msg)
+	case screenServer:
+		a.server, cmd = a.server.Update(msg)
 	}
 	return a, cmd
 }
@@ -99,6 +110,8 @@ func (a app) View() tea.View {
 		content = a.create.View()
 	case screenManage:
 		content = a.manage.View()
+	case screenServer:
+		content = a.server.View()
 	}
 
 	v := tea.NewView(appStyle.Render(content))
