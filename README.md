@@ -74,9 +74,10 @@ hand. For reference, records and settings are stored as TOML in:
 - macOS / Linux: `~/.config/dnssie/` (honors `$XDG_CONFIG_HOME`)
 - Windows: `%AppData%\dnssie\`
 
-From the **DNS server** screen you can change the listen port and choose
-whether unmatched queries are forwarded to your system resolvers or to a
-manual list of upstreams.
+From the **DNS server** screen you can change the listen port and choose how
+unmatched queries are handled: forwarded to your system resolvers, forwarded
+to a manual list of upstreams, or not forwarded at all (anything without a
+local record returns `NXDOMAIN`).
 
 ## Notes
 

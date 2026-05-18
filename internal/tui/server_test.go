@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/rmmorrison/dnssie/internal/config"
@@ -39,13 +40,27 @@ func TestServerToggleSourceWithSpace(t *testing.T) {
 	}
 }
 
-func TestServerToggleSourceWithEnter(t *testing.T) {
-	m := browsingServer(manualCfg("1.1.1.1:53"))
+func TestServerCycleSourceForwardWraps(t *testing.T) {
+	m := browsingServer(systemCfg())
 	m.cursor = focusSource
 
-	m, _ = m.updateBrowsing(key("enter"))
-	if m.cfg.Resolvers.Mode != config.ModeSystem {
-		t.Errorf("mode = %q, want system after toggle", m.cfg.Resolvers.Mode)
+	// enter / space / right all advance: system -> manual -> off -> system.
+	for _, want := range []string{config.ModeManual, config.ModeOff, config.ModeSystem} {
+		m, _ = m.updateBrowsing(key("enter"))
+		if m.cfg.Resolvers.Mode != want {
+			t.Fatalf("mode = %q, want %q", m.cfg.Resolvers.Mode, want)
+		}
+		m.step = serverBrowsing // toggle moved us to serverSaving
+	}
+}
+
+func TestServerCycleSourceLeftGoesBackward(t *testing.T) {
+	m := browsingServer(systemCfg())
+	m.cursor = focusSource
+
+	m, _ = m.updateBrowsing(key("left")) // system -> off (wrap backward)
+	if m.cfg.Resolvers.Mode != config.ModeOff {
+		t.Errorf("mode = %q, want off after left from system", m.cfg.Resolvers.Mode)
 	}
 }
 
@@ -194,12 +209,28 @@ func TestServerNavigationClamps(t *testing.T) {
 	}
 }
 
-func TestServerToggleToSystemClampsCursor(t *testing.T) {
+func TestServerCycleSourceClampsCursor(t *testing.T) {
 	m := browsingServer(manualCfg("1.1.1.1:53", "8.8.8.8:53"))
-	m.cursor = 4 // the "add" row in manual mode
-	m, _ = m.toggleSource()
+	m.cursor = 4 // the "add" row, only reachable in manual mode
+	m, _ = m.cycleSource(1)
 	if m.cursor >= m.focusCount() {
 		t.Errorf("cursor = %d not clamped to focusCount %d", m.cursor, m.focusCount())
+	}
+}
+
+func TestServerOffModeView(t *testing.T) {
+	m := browsingServer(config.Config{
+		Port:      53,
+		Resolvers: config.Resolvers{Mode: config.ModeOff},
+	})
+	out := m.View()
+	for _, want := range []string{
+		"Resolver source", "Off",
+		"Unmatched queries return NXDOMAIN; nothing is forwarded.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Off-mode view missing %q\n%s", want, out)
+		}
 	}
 }
 

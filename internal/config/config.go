@@ -30,6 +30,9 @@ const (
 	ModeSystem = "system"
 	// ModeManual forwards unmatched queries to Resolvers.Upstream.
 	ModeManual = "manual"
+	// ModeOff disables forwarding entirely: queries that don't match a local
+	// record get NXDOMAIN instead of being sent upstream.
+	ModeOff = "off"
 
 	// defaultPort is unprivileged so dnssie runs without root/admin. It
 	// avoids 5353, which collides with mDNS/Bonjour (mDNSResponder on
@@ -46,7 +49,7 @@ var ErrSystemResolversUnavailable = errors.New("system resolvers are not availab
 
 // Resolvers describes how unmatched lookups are forwarded.
 type Resolvers struct {
-	// Mode is ModeSystem or ModeManual.
+	// Mode is ModeSystem, ModeManual, or ModeOff.
 	Mode string `toml:"mode"`
 	// Upstream is the manually configured resolver list (host:port), used
 	// when Mode is ModeManual.

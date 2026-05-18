@@ -296,9 +296,13 @@ func (m server) updateBrowsing(msg tea.KeyPressMsg) (server, tea.Cmd) {
 		if m.cursor < m.focusCount()-1 {
 			m.cursor++
 		}
-	case "left", "right", "space":
+	case "left":
 		if m.cursor == focusSource {
-			return m.toggleSource()
+			return m.cycleSource(-1)
+		}
+	case "right", "space":
+		if m.cursor == focusSource {
+			return m.cycleSource(1)
 		}
 	case "a":
 		if m.manual() {
@@ -334,7 +338,7 @@ func (m server) updateBrowsing(msg tea.KeyPressMsg) (server, tea.Cmd) {
 			m.step = serverEditPort
 			return m, m.input.Focus()
 		case m.cursor == focusSource:
-			return m.toggleSource()
+			return m.cycleSource(1)
 		case m.onAddRow():
 			m.editingNew = true
 			m.editErr = nil
@@ -356,15 +360,39 @@ func (m server) updateBrowsing(msg tea.KeyPressMsg) (server, tea.Cmd) {
 	return m, nil
 }
 
-func (m server) toggleSource() (server, tea.Cmd) {
-	if m.manual() {
-		m.cfg.Resolvers.Mode = config.ModeSystem
-	} else {
-		m.cfg.Resolvers.Mode = config.ModeManual
+// sourceModes is the cycle order for the "Resolver source" setting.
+var sourceModes = []string{config.ModeSystem, config.ModeManual, config.ModeOff}
+
+// cycleSource advances the resolver source by delta (wrapping) and persists it.
+func (m server) cycleSource(delta int) (server, tea.Cmd) {
+	idx := 0
+	for i, mode := range sourceModes {
+		if m.cfg.Resolvers.Mode == mode {
+			idx = i
+			break
+		}
 	}
+	idx = (idx + delta + len(sourceModes)) % len(sourceModes)
+	m.cfg.Resolvers.Mode = sourceModes[idx]
 	m.clampCursor()
 	m.step = serverSaving
 	return m, saveConfigCmd(m.cfg)
+}
+
+// toggleSource advances to the next resolver source. Retained for callers and
+// tests that don't care about direction.
+func (m server) toggleSource() (server, tea.Cmd) { return m.cycleSource(1) }
+
+// sourceLabel is the display name for the current resolver source.
+func (m server) sourceLabel() string {
+	switch m.cfg.Resolvers.Mode {
+	case config.ModeManual:
+		return "Manual"
+	case config.ModeOff:
+		return "Off"
+	default:
+		return "System"
+	}
 }
 
 func (m server) updateEditPort(msg tea.KeyPressMsg) (server, tea.Cmd) {
@@ -530,15 +558,12 @@ func (m server) View() string {
 	}
 	b.WriteString(itemStyle.Render(fmt.Sprintf("  [ s ] %s server", act)) + "\n\n")
 
-	source := "System"
-	if m.manual() {
-		source = "Manual"
-	}
 	b.WriteString(row(m.cursor == focusPort, "Listen port", strconv.Itoa(m.cfg.Port)))
-	b.WriteString(row(m.cursor == focusSource, "Resolver source", source))
+	b.WriteString(row(m.cursor == focusSource, "Resolver source", m.sourceLabel()))
 	b.WriteByte('\n')
 
-	if m.manual() {
+	switch m.cfg.Resolvers.Mode {
+	case config.ModeManual:
 		b.WriteString(groupStyle.Render("Upstream resolvers"))
 		b.WriteByte('\n')
 		if len(m.cfg.Resolvers.Upstream) == 0 {
@@ -550,7 +575,13 @@ func (m server) View() string {
 			b.WriteString(line(focused, up))
 		}
 		b.WriteString(line(m.onAddRow(), subtitleStyle.Render("+ add resolver")))
-	} else {
+	case config.ModeOff:
+		b.WriteString(groupStyle.Render("Forwarding disabled"))
+		b.WriteByte('\n')
+		b.WriteString(subtitleStyle.Render(
+			"  Unmatched queries return NXDOMAIN; nothing is forwarded."))
+		b.WriteByte('\n')
+	default:
 		b.WriteString(groupStyle.Render("System resolvers"))
 		b.WriteByte('\n')
 		switch {
@@ -623,7 +654,7 @@ func (m server) footer() string {
 	case m.cursor == focusPort:
 		parts = append(parts, "enter edit port")
 	case m.cursor == focusSource:
-		parts = append(parts, "space toggle source")
+		parts = append(parts, "←/→ change source")
 	case m.onAddRow():
 		parts = append(parts, "enter add resolver")
 	default: // an upstream entry (manual mode)

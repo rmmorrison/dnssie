@@ -110,6 +110,34 @@ func TestServerForwardsUnmatched(t *testing.T) {
 	}
 }
 
+func TestServerOffModeReturnsNXDOMAIN(t *testing.T) {
+	recDir := t.TempDir()
+	if err := store.New(recDir).Save([]store.Record{
+		{Type: "A", Name: "app.test.", Value: "192.0.2.9"},
+	}); err != nil {
+		t.Fatalf("seed records: %v", err)
+	}
+	cfgDir := t.TempDir()
+	if err := config.New(cfgDir).Save(config.Config{
+		Port:      5353,
+		Resolvers: config.Resolvers{Mode: config.ModeOff},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	addr := runServer(t, recDir, cfgDir)
+
+	// Local records are still answered authoritatively.
+	if resp := query(t, addr, "app.test", dns.TypeA); resp.Rcode != dns.RcodeSuccess ||
+		len(resp.Answer) != 1 {
+		t.Fatalf("local query: rcode=%d answers=%d", resp.Rcode, len(resp.Answer))
+	}
+	// Everything else is NXDOMAIN, not forwarded and not SERVFAIL.
+	resp := query(t, addr, "nowhere.example.org", dns.TypeA)
+	if resp.Rcode != dns.RcodeNameError {
+		t.Errorf("rcode = %d, want NXDOMAIN (%d)", resp.Rcode, dns.RcodeNameError)
+	}
+}
+
 func TestServerServfailWhenNoUpstreams(t *testing.T) {
 	cfgDir := t.TempDir()
 	if err := config.New(cfgDir).Save(config.Config{

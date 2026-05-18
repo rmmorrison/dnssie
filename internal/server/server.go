@@ -213,8 +213,19 @@ func (s *Server) handle(w dns.ResponseWriter, req *dns.Msg) {
 		return
 	}
 
-	// No local match: forward.
-	ups, err := upstreamsFor(s.cfg.snapshot())
+	// No local match.
+	cfg := s.cfg.snapshot()
+	if cfg.Resolvers.Mode == config.ModeOff {
+		// Forwarding disabled: dnssie only answers for its own records, so
+		// everything else simply doesn't exist here.
+		m.SetRcode(req, dns.RcodeNameError)
+		outcome = "nxdomain"
+		_ = w.WriteMsg(m)
+		return
+	}
+
+	// Forward.
+	ups, err := upstreamsFor(cfg)
 	if err != nil || len(ups) == 0 {
 		m.SetRcode(req, dns.RcodeServerFailure)
 		_ = w.WriteMsg(m)
