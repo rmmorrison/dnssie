@@ -72,6 +72,19 @@ type serverActionMsg struct{ err error }
 // statusTickMsg drives periodic status polling while the screen is open.
 type statusTickMsg struct{}
 
+// recentQueriesMsg carries the latest lookups the running server logged.
+type recentQueriesMsg struct{ lines []string }
+
+// maxRecentShown bounds the live lookup list rendered on the screen.
+const maxRecentShown = 10
+
+func recentQueriesCmd() tea.Cmd {
+	return func() tea.Msg {
+		lines, _ := supervisor.RecentQueries(maxRecentShown)
+		return recentQueriesMsg{lines: lines}
+	}
+}
+
 func serverStatusCmd() tea.Cmd {
 	return func() tea.Msg {
 		running, info, err := supervisor.Status()
@@ -88,7 +101,7 @@ func stopServerCmd() tea.Cmd {
 }
 
 func statusTickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return statusTickMsg{} })
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return statusTickMsg{} })
 }
 
 type serverStep int
@@ -124,11 +137,12 @@ type server struct {
 	opErr      error
 	editErr    error // transient validation error in an edit step
 
-	running   bool
-	srvInfo   supervisor.Info
-	statusErr error
-	busy      bool  // a start/stop request is in flight
-	actionErr error // last start/stop failure
+	running       bool
+	srvInfo       supervisor.Info
+	statusErr     error
+	busy          bool     // a start/stop request is in flight
+	actionErr     error    // last start/stop failure
+	recentQueries []string // live lookups while the server runs
 
 	width  int
 	height int
@@ -142,7 +156,7 @@ func newServer() server {
 
 func (m server) Init() tea.Cmd {
 	return tea.Batch(loadConfigCmd(), systemResolversCmd(),
-		serverStatusCmd(), statusTickCmd())
+		serverStatusCmd(), recentQueriesCmd(), statusTickCmd())
 }
 
 func (m server) manual() bool {
@@ -219,6 +233,13 @@ func (m server) Update(msg tea.Msg) (server, tea.Cmd) {
 		m.srvInfo = msg.info
 		m.statusErr = msg.err
 		m.busy = false
+		if !msg.running {
+			m.recentQueries = nil // don't show a stopped server's history
+		}
+		return m, nil
+
+	case recentQueriesMsg:
+		m.recentQueries = msg.lines
 		return m, nil
 
 	case serverActionMsg:
@@ -231,7 +252,7 @@ func (m server) Update(msg tea.Msg) (server, tea.Cmd) {
 		// browsing and idle to avoid redundant work.
 		cmds := []tea.Cmd{statusTickCmd()}
 		if m.step == serverBrowsing && !m.busy {
-			cmds = append(cmds, serverStatusCmd())
+			cmds = append(cmds, serverStatusCmd(), recentQueriesCmd())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -547,7 +568,39 @@ func (m server) View() string {
 		}
 	}
 
+	if m.running {
+		b.WriteByte('\n')
+		b.WriteString(groupStyle.Render("Recent lookups"))
+		b.WriteByte('\n')
+		if len(m.recentQueries) == 0 {
+			b.WriteString(subtitleStyle.Render("  (waiting for queries…)"))
+			b.WriteByte('\n')
+		} else {
+			w := contentWidth(m.width) - 2
+			for _, q := range m.recentQueries {
+				b.WriteString("  ")
+				b.WriteString(subtitleStyle.Render(clip(q, w)))
+				b.WriteByte('\n')
+			}
+		}
+	}
+
 	return b.String()
+}
+
+// clip truncates s to at most w display columns, adding an ellipsis when cut.
+func clip(s string, w int) string {
+	if w < 1 {
+		w = 1
+	}
+	r := []rune(s)
+	if len(r) <= w {
+		return s
+	}
+	if w == 1 {
+		return "…"
+	}
+	return string(r[:w-1]) + "…"
 }
 
 func (m server) footer() string {

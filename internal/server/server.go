@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -12,8 +13,12 @@ import (
 	"github.com/miekg/dns"
 
 	"github.com/rmmorrison/dnssie/internal/config"
+	"github.com/rmmorrison/dnssie/internal/paths"
 	"github.com/rmmorrison/dnssie/internal/store"
 )
+
+// maxQueryLog is how many recent lookups the server keeps for the TUI.
+const maxQueryLog = 200
 
 // configCache mirrors recordCache for config.toml so resolver/upstream edits
 // take effect on a running server without a restart. A missing file yields
@@ -75,6 +80,7 @@ type Server struct {
 	cfg   *configCache
 	udp   *dns.Server
 	tcp   *dns.Server
+	qlog  *queryLog
 	ready chan struct{}
 
 	mu   sync.RWMutex
@@ -101,10 +107,15 @@ func New(opts Options) (*Server, error) {
 	if opts.Logf == nil {
 		opts.Logf = log.Printf
 	}
+	var qlog *queryLog
+	if dir, err := paths.ConfigDir(); err == nil {
+		qlog = newQueryLog(dir, maxQueryLog)
+	}
 	return &Server{
 		opts:  opts,
 		recs:  newRecordCache(opts.Records),
 		cfg:   newConfigCache(opts.Config),
+		qlog:  qlog,
 		ready: make(chan struct{}),
 		addr:  net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.Port)),
 	}, nil
@@ -127,6 +138,7 @@ func (s *Server) Ready() <-chan struct{} { return s.ready }
 func (s *Server) Run(ctx context.Context) error {
 	mux := dns.NewServeMux()
 	mux.HandleFunc(".", s.handle)
+	s.qlog.reset() // start each run with a clean lookup log
 
 	pc, err := net.ListenPacket("udp", s.Addr())
 	if err != nil {
@@ -182,6 +194,9 @@ func (s *Server) handle(w dns.ResponseWriter, req *dns.Msg) {
 	q := req.Question[0]
 	qname := dns.CanonicalName(q.Name)
 
+	outcome := "servfail"
+	defer func() { s.logQuery(q, outcome) }()
+
 	var answers []dns.RR
 	for _, rec := range s.recs.snapshot() {
 		if matches(rec, qname, q.Qtype) {
@@ -193,6 +208,7 @@ func (s *Server) handle(w dns.ResponseWriter, req *dns.Msg) {
 	if len(answers) > 0 {
 		m.Answer = answers
 		m.Authoritative = true
+		outcome = "local"
 		_ = w.WriteMsg(m)
 		return
 	}
@@ -214,6 +230,22 @@ func (s *Server) handle(w dns.ResponseWriter, req *dns.Msg) {
 		_ = w.WriteMsg(m)
 		return
 	}
+	outcome = "forwarded " + dns.RcodeToString[reply.Rcode]
 	reply.Id = req.Id
 	_ = w.WriteMsg(reply)
+}
+
+// logQuery appends a display-ready line to the recent-lookups log the TUI
+// tails. The server binds loopback only, so the client is always local and
+// omitted to keep lines short.
+func (s *Server) logQuery(q dns.Question, outcome string) {
+	if s.qlog == nil {
+		return
+	}
+	qtype := dns.TypeToString[q.Qtype]
+	if qtype == "" {
+		qtype = fmt.Sprintf("TYPE%d", q.Qtype)
+	}
+	s.qlog.add(fmt.Sprintf("%s  %-28s %-5s %s",
+		time.Now().Format("15:04:05"), dns.CanonicalName(q.Name), qtype, outcome))
 }
