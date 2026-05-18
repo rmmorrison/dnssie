@@ -75,12 +75,13 @@ type statusTickMsg struct{}
 // recentQueriesMsg carries the latest lookups the running server logged.
 type recentQueriesMsg struct{ lines []string }
 
-// maxRecentShown bounds the live lookup list rendered on the screen.
-const maxRecentShown = 10
+// recentQueryBuffer is how much lookup history the screen keeps in memory;
+// only as much of its tail as the terminal can fit is rendered at a time.
+const recentQueryBuffer = 200
 
 func recentQueriesCmd() tea.Cmd {
 	return func() tea.Msg {
-		lines, _ := supervisor.RecentQueries(maxRecentShown)
+		lines, _ := supervisor.RecentQueries(recentQueryBuffer)
 		return recentQueriesMsg{lines: lines}
 	}
 }
@@ -605,23 +606,59 @@ func (m server) View() string {
 	}
 
 	if m.running {
-		b.WriteByte('\n')
-		b.WriteString(m.st.group.Render("Recent lookups"))
-		b.WriteByte('\n')
-		if len(m.recentQueries) == 0 {
-			b.WriteString(m.st.subtitle.Render("  (waiting for queries…)"))
+		// Fit the lookup list into whatever vertical space is left after the
+		// rest of the screen, so it never pushes the UI off the terminal.
+		// "room" is the number of lines available below the section's blank
+		// separator and its "Recent lookups" header.
+		used := strings.Count(b.String(), "\n")
+		room := m.bodyBudget() - used - 2
+		if room >= 1 {
 			b.WriteByte('\n')
-		} else {
-			w := contentWidth(m.width) - 2
-			for _, q := range m.recentQueries {
-				b.WriteString("  ")
-				b.WriteString(m.st.subtitle.Render(clip(q, w)))
+			b.WriteString(m.st.group.Render("Recent lookups"))
+			b.WriteByte('\n')
+
+			all := m.recentQueries
+			if len(all) == 0 {
+				b.WriteString(m.st.subtitle.Render("  (waiting for queries…)"))
 				b.WriteByte('\n')
+			} else {
+				show := len(all)
+				indicator := false
+				if show > room {
+					show = room
+					if room >= 2 {
+						// Trade one row for the "earlier hidden" line.
+						show = room - 1
+						indicator = true
+					}
+				}
+				if indicator {
+					b.WriteString(m.st.subtitle.Render(fmt.Sprintf(
+						"  ⋮ %d earlier lookups hidden", len(all)-show)))
+					b.WriteByte('\n')
+				}
+				w := contentWidth(m.width) - 2
+				for _, q := range all[len(all)-show:] {
+					b.WriteString("  ")
+					b.WriteString(m.st.subtitle.Render(clip(q, w)))
+					b.WriteByte('\n')
+				}
 			}
 		}
 	}
 
 	return b.String()
+}
+
+// bodyBudget is the maximum number of lines the screen body may use before
+// the surrounding chrome (card border/padding, footer, app padding ≈ 8 lines,
+// plus a one-line safety margin) would push content past the bottom of the
+// terminal.
+func (m server) bodyBudget() int {
+	if m.height <= 0 {
+		return 16 // sensible default before the first WindowSizeMsg
+	}
+	return m.height - 9
 }
 
 // clip truncates s to at most w display columns, adding an ellipsis when cut.

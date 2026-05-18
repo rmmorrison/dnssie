@@ -2,8 +2,11 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/rmmorrison/dnssie/internal/config"
 )
@@ -266,5 +269,83 @@ func TestServerSystemResolversMsg(t *testing.T) {
 	m, _ = m.Update(systemResolversMsg{err: config.ErrSystemResolversUnavailable})
 	if m.sysErr == nil {
 		t.Error("sysErr should be set")
+	}
+}
+
+func TestServerBodyBudget(t *testing.T) {
+	cases := map[int]int{
+		0:  16, // no size yet -> default
+		25: 16, // 25 - 9
+		40: 31, // 40 - 9
+	}
+	for h, want := range cases {
+		m := newServer()
+		m.height = h
+		if got := m.bodyBudget(); got != want {
+			t.Errorf("bodyBudget(height=%d) = %d, want %d", h, got, want)
+		}
+	}
+}
+
+// runningServerApp returns a root app on the server screen, sized w x h, with a
+// running server that has logged nLookups queries.
+func runningServerApp(t *testing.T, w, h, nLookups int) app {
+	t.Helper()
+	a := newApp()
+	mdl, _ := a.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	a = mdl.(app)
+	a.screen = screenServer
+
+	s := a.server
+	s.cfg = config.Config{Port: 1053, Resolvers: config.Resolvers{Mode: config.ModeSystem}}
+	s.step = serverBrowsing
+	s.running = true
+	s.srvInfo.Addr = "127.0.0.1:1053"
+	s.sysRes = []string{"1.1.1.1:53", "8.8.8.8:53"}
+	for i := 0; i < nLookups; i++ {
+		s.recentQueries = append(s.recentQueries,
+			fmt.Sprintf("12:00:%02d  q%02d.test. A local", i%60, i))
+	}
+	a.server = s
+	return a
+}
+
+func TestServerRecentLookupsNeverOverflowTerminal(t *testing.T) {
+	for _, h := range []int{20, 25, 30, 40, 60} {
+		a := runningServerApp(t, 90, h, 80)
+		out := a.View().Content
+		if got := strings.Count(out, "\n") + 1; got > h {
+			t.Errorf("terminal height %d: rendered %d lines (overflow):\n%s", h, got, out)
+		}
+	}
+}
+
+func TestServerRecentLookupsTailWithIndicator(t *testing.T) {
+	a := runningServerApp(t, 90, 25, 80) // q0..q79
+	out := a.server.View()
+
+	if !strings.Contains(out, "q79.test.") {
+		t.Errorf("newest lookup q79 missing:\n%s", out)
+	}
+	if strings.Contains(out, "q00.test.") {
+		t.Errorf("oldest lookup q00 should be hidden:\n%s", out)
+	}
+	if !strings.Contains(out, "earlier lookups hidden") {
+		t.Errorf("missing 'earlier lookups hidden' indicator:\n%s", out)
+	}
+	if rows := strings.Count(out, ".test."); rows > a.server.bodyBudget() || rows < 1 {
+		t.Errorf("rendered %d lookup rows, want between 1 and budget %d",
+			rows, a.server.bodyBudget())
+	}
+}
+
+func TestServerRecentLookupsGrowWithTerminal(t *testing.T) {
+	small := runningServerApp(t, 90, 24, 80)
+	large := runningServerApp(t, 90, 50, 80)
+
+	rs := strings.Count(small.server.View(), ".test.")
+	rl := strings.Count(large.server.View(), ".test.")
+	if rl <= rs {
+		t.Errorf("a taller terminal should show more lookups: 24-row=%d, 50-row=%d", rs, rl)
 	}
 }

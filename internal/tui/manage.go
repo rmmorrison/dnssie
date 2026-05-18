@@ -76,6 +76,7 @@ type manage struct {
 	records   []store.Record // canonical set as loaded from disk
 	activeTab int            // index into supportedTypes
 	cursor    int            // row within the active tab
+	scroll    int            // top row of the visible table window
 	editIdx   int            // index into records being edited/deleted
 	name      textinput.Model
 	value     textinput.Model
@@ -130,7 +131,8 @@ func (m manage) tabIndices() []int {
 	return idx
 }
 
-// rebuild clamps the cursor to the active tab's row count.
+// rebuild clamps the cursor to the active tab's row count and keeps the
+// scroll window consistent.
 func (m *manage) rebuild() {
 	n := len(m.tabIndices())
 	if m.cursor >= n {
@@ -139,7 +141,45 @@ func (m *manage) rebuild() {
 	if m.cursor < 0 {
 		m.cursor = 0
 	}
+	m.followCursor()
 }
+
+// visibleRows is how many record rows fit in the scrollable table window. It
+// is derived from the fixed region so the card never resizes with the data.
+func (m manage) visibleRows() int {
+	// regionHeight budget minus table chrome (top/bottom border, header,
+	// header separator = 4) and the scroll status line (1).
+	v := m.regionHeight() - 5
+	if v < 1 {
+		v = 1
+	}
+	return v
+}
+
+// clampedScroll returns the table's top-row offset, adjusted so the cursor
+// stays visible and the window never runs past the end of the list.
+func (m manage) clampedScroll() int {
+	vis := m.visibleRows()
+	n := len(m.tabIndices())
+	s := m.scroll
+	if m.cursor < s {
+		s = m.cursor
+	}
+	if m.cursor >= s+vis {
+		s = m.cursor - vis + 1
+	}
+	if maxScroll := n - vis; s > maxScroll {
+		s = maxScroll
+	}
+	if s < 0 {
+		s = 0
+	}
+	return s
+}
+
+// followCursor persists the scroll offset so navigation moves the window only
+// when the cursor would otherwise leave it.
+func (m *manage) followCursor() { m.scroll = m.clampedScroll() }
 
 // selected returns the highlighted record's index into m.records, or false if
 // there is nothing to select on the active tab.
@@ -229,18 +269,22 @@ func (m manage) updateBrowsing(msg tea.KeyPressMsg) (manage, tea.Cmd) {
 	case "left", "h", "shift+tab":
 		m.activeTab = (m.activeTab - 1 + len(supportedTypes)) % len(supportedTypes)
 		m.cursor = 0
+		m.scroll = 0
 		m.opErr = nil
 	case "right", "l", "tab":
 		m.activeTab = (m.activeTab + 1) % len(supportedTypes)
 		m.cursor = 0
+		m.scroll = 0
 		m.opErr = nil
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
+			m.followCursor()
 		}
 	case "down", "j":
 		if m.cursor < len(m.tabIndices())-1 {
 			m.cursor++
+			m.followCursor()
 		}
 	case "e":
 		idx, ok := m.selected()
@@ -409,11 +453,11 @@ func (m manage) tabBar(width int) string {
 	return bar + "\n" + rule
 }
 
-// recordsTable renders the active tab's records as a styled table, with the
-// highlighted row standing out.
-func (m manage) recordsTable(width int, ti []int) string {
-	rows := make([][]string, len(ti))
-	for i, idx := range ti {
+// recordsTable renders the given window of rows as a styled table, with the
+// row at offset sel (within the window) highlighted.
+func (m manage) recordsTable(width int, window []int, sel int) string {
+	rows := make([][]string, len(window))
+	for i, idx := range window {
 		r := m.records[idx]
 		rows[i] = []string{r.Name, r.Value}
 	}
@@ -428,7 +472,7 @@ func (m manage) recordsTable(width int, ti []int) string {
 			switch {
 			case row == table.HeaderRow:
 				return m.st.tableHead
-			case row == m.cursor:
+			case row == sel:
 				return m.st.tableSel
 			default:
 				return m.st.tableCell
@@ -515,7 +559,25 @@ func (m manage) View() string {
 		return b.String()
 	}
 
-	b.WriteString(padBlock(m.recordsTable(width, ti), m.regionHeight()))
+	// Show only a fixed-height window of rows; the table scrolls with the
+	// cursor instead of growing the card.
+	vis := m.visibleRows()
+	scroll := m.clampedScroll()
+	end := min(scroll+vis, len(ti))
+	window := ti[scroll:end]
+
+	tbl := m.recordsTable(width, window, m.cursor-scroll)
+
+	status := fmt.Sprintf("rows %d–%d of %d", scroll+1, end, len(ti))
+	if scroll > 0 {
+		status = "↑ " + status
+	}
+	if end < len(ti) {
+		status += " ↓"
+	}
+	block := tbl + "\n" + m.st.subtitle.Render("  "+status)
+
+	b.WriteString(padBlock(block, m.regionHeight()))
 	return b.String()
 }
 

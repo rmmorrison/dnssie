@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -317,6 +318,86 @@ func TestViewEmptyTabShowsCenteredMessage(t *testing.T) {
 	}
 	if got, want := m.footer(), "←/→ tabs · esc back"; got != want {
 		t.Errorf("footer = %q, want %q", got, want)
+	}
+}
+
+func manyA(n int) []store.Record {
+	recs := make([]store.Record, n)
+	for i := range recs {
+		recs[i] = store.Record{
+			Type:  "A",
+			Name:  fmt.Sprintf("host%03d.test.", i),
+			Value: fmt.Sprintf("10.0.0.%d", i),
+		}
+	}
+	return recs
+}
+
+func TestManageScrollFollowsCursor(t *testing.T) {
+	m := browsing(manyA(20))
+	m.width, m.height = 80, 24
+	vis := m.visibleRows()
+	if vis < 1 {
+		t.Fatalf("visibleRows = %d, want >= 1", vis)
+	}
+
+	// Walk the cursor to the bottom; the window must follow it.
+	for i := 0; i < 19; i++ {
+		m, _ = m.updateBrowsing(key("down"))
+		if m.cursor < m.scroll || m.cursor >= m.scroll+vis {
+			t.Fatalf("cursor %d outside window [%d,%d)", m.cursor, m.scroll, m.scroll+vis)
+		}
+	}
+	if m.scroll == 0 {
+		t.Error("scroll should have advanced past 0 with 20 rows")
+	}
+
+	// Walking back to the top scrolls the window home again.
+	for i := 0; i < 19; i++ {
+		m, _ = m.updateBrowsing(key("up"))
+	}
+	if m.scroll != 0 {
+		t.Errorf("scroll = %d, want 0 back at the top", m.scroll)
+	}
+
+	// Switching tabs resets both cursor and scroll.
+	m.cursor, m.scroll = 5, 3
+	m, _ = m.updateBrowsing(key("right"))
+	if m.cursor != 0 || m.scroll != 0 {
+		t.Errorf("after tab switch cursor=%d scroll=%d, want 0/0", m.cursor, m.scroll)
+	}
+}
+
+func TestManageCardHeightStableRegardlessOfRowCount(t *testing.T) {
+	lines := func(s string) int { return strings.Count(s, "\n") }
+
+	small := browsing(manyA(3))
+	small.width, small.height = 80, 24
+	big := browsing(manyA(80))
+	big.width, big.height = 80, 24
+
+	if a, b := lines(small.View()), lines(big.View()); a != b {
+		t.Errorf("view height changed with row count: 3 rows=%d, 80 rows=%d", a, b)
+	}
+}
+
+func TestManageScrollIndicator(t *testing.T) {
+	few := browsing(manyA(3))
+	few.width, few.height = 80, 24
+	if out := few.View(); !strings.Contains(out, "rows 1–3 of 3") ||
+		strings.Contains(out, "↑") || strings.Contains(out, "↓") {
+		t.Errorf("non-scrolling indicator wrong:\n%s", out)
+	}
+
+	many := browsing(manyA(50))
+	many.width, many.height = 80, 24
+	for i := 0; i < 25; i++ {
+		many, _ = many.updateBrowsing(key("down"))
+	}
+	out := many.View()
+	if !strings.Contains(out, "↑") || !strings.Contains(out, "↓") ||
+		!strings.Contains(out, "of 50") {
+		t.Errorf("scrolling indicator should show both arrows and total:\n%s", out)
 	}
 }
 
