@@ -83,6 +83,8 @@ func (m menu) Update(msg tea.Msg) (menu, tea.Cmd) {
 				return m, tea.Quit
 			case actionCreateRecord:
 				return m, changeScreen(screenCreate)
+			case actionManageRecords:
+				return m, changeScreen(screenManage)
 			default:
 				// These screens aren't built yet.
 				m.selected = &choice
@@ -118,6 +120,10 @@ var (
 	errorStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#E64545"))
+
+	groupStyle = lipgloss.NewStyle().
+			Bold(true).
+			Underline(true)
 
 	helpStyle = lipgloss.NewStyle().
 			Faint(true)

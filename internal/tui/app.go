@@ -11,6 +11,7 @@ type screen int
 const (
 	screenMenu screen = iota
 	screenCreate
+	screenManage
 )
 
 // changeScreenMsg asks the app to switch to a different screen. Sub-models
@@ -29,6 +30,7 @@ type app struct {
 	screen screen
 	menu   menu
 	create createRecord
+	manage manage
 	width  int
 	height int
 }
@@ -38,6 +40,7 @@ func newApp() app {
 		screen: screenMenu,
 		menu:   newMenu(),
 		create: newCreateRecord(),
+		manage: newManage(),
 	}
 }
 
@@ -50,9 +53,10 @@ func (a app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		// Keep both sub-models sized even while inactive.
+		// Keep sub-models sized even while inactive.
 		a.menu, _ = a.menu.Update(msg)
 		a.create, _ = a.create.Update(msg)
+		a.manage, _ = a.manage.Update(msg)
 		return a, nil
 
 	case changeScreenMsg:
@@ -63,6 +67,11 @@ func (a app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.create = newCreateRecord()
 			a.create, _ = a.create.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
 			return a, a.create.Init()
+		case screenManage:
+			// Reload records fresh on each visit.
+			a.manage = newManage()
+			a.manage, _ = a.manage.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
+			return a, a.manage.Init()
 		case screenMenu:
 			return a, a.menu.Init()
 		}
@@ -75,6 +84,8 @@ func (a app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.menu, cmd = a.menu.Update(msg)
 	case screenCreate:
 		a.create, cmd = a.create.Update(msg)
+	case screenManage:
+		a.manage, cmd = a.manage.Update(msg)
 	}
 	return a, cmd
 }
@@ -86,6 +97,8 @@ func (a app) View() tea.View {
 		content = a.menu.View()
 	case screenCreate:
 		content = a.create.View()
+	case screenManage:
+		content = a.manage.View()
 	}
 
 	v := tea.NewView(appStyle.Render(content))
