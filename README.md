@@ -1,53 +1,52 @@
 # dnssie
 
-A dev-friendly DNS server with a terminal UI.
+A developer-friendly DNS server with a terminal UI for straightforward management.
 
-`dnssie` lets you define your own DNS records (point a hostname at an IP,
-override a domain locally, mock an MX, etc.) and serves them from a small
-local DNS server. Anything you haven't defined is forwarded to your normal
-resolvers, so it stays out of the way.
+## Why not just edit /etc/hosts?
+
+* It serves real record types (`CNAME`, `MX`, `TXT`, `SOA`, `NS`, `PTR`), not just name-to-IP mappings.
+* It supports wildcards, so `*.app.test.` resolves without listing every subdomain.
+* Names you haven't defined are forwarded to your normal resolvers instead of failing.
+* No root needed: records live in your own config directory, not a system-wide file.
+* Per-record TTLs and an opt-in "erratic mode" let you test client caching and failure handling.
+* It's a real DNS server, so tools and libraries that ignore `/etc/hosts` still see it.
+* A terminal UI manages records and shows lookups live, instead of hand-editing a file.
 
 ## What this is not
 
-`dnssie` is a local development and testing tool. It is not your new
-production DNS server, not an authoritative nameserver for real zones, and
-not built to be exposed to a network. Use it on `localhost` while you work.
+This isn't [dnsmasq](https://thekelleys.org.uk/dnsmasq/doc.html) or [Unbound](https://nlnetlabs.nl/projects/unbound/about/) and it's _definitely_ not your new production DNS server.
 
-## Requirements
+## Quick Start
 
-`dnssie` ships as a single self-contained binary — there's nothing to install
-alongside it.
+Prebuilt binaries for Linux, macOS, and Windows are on the
+[Releases page](https://github.com/rmmorrison/dnssie/releases).
 
-- A 64-bit Linux, macOS, or Windows machine (amd64 or arm64).
-- Go 1.26 or newer **only if** you build from source.
-
-Windows is supported on a best-effort basis.
-
-## Install
-
-### Download a release (recommended)
-
-Download the archive for your platform from the
-[Releases page](https://github.com/rmmorrison/dnssie/releases), extract it, and
-move the `dnssie` binary somewhere on your `PATH`. No Go toolchain required.
+1. Download the archive for your platform and extract it.
+2. Move the `dnssie` binary somewhere on your `PATH`.
+3. Run `dnssie`.
 
 ```sh
 # Example: macOS on Apple silicon
 tar -xzf dnssie_0.1.0_darwin_arm64.tar.gz
 sudo mv dnssie /usr/local/bin/
-dnssie version
+dnssie
 ```
 
-Linux/macOS archives are `.tar.gz`; Windows archives are `.zip` (extract and
-run `dnssie.exe`). Every release also publishes `checksums.txt` so you can
-verify your download.
+(Windows archives are `.zip`; run `dnssie.exe`.)
 
-The macOS binary isn't notarized, so the first launch may be blocked by
-Gatekeeper. Clear the quarantine flag with
-`xattr -d com.apple.quarantine ./dnssie`, or right-click the binary and choose
-**Open**.
+In the UI, choose **Create a new record** to add e.g. `app.test.` → `127.0.0.1`,
+then open **DNS server** and press `s` to start it. Query it from another
+terminal:
 
-### Build from source
+```sh
+dig @127.0.0.1 -p 1053 app.test
+```
+
+The server keeps running after you quit the UI — it listens on `127.0.0.1:1053`
+by default. Relaunch `dnssie` to see its status and recent lookups, or to stop
+it.
+
+## Build from source
 
 Requires Go 1.26+:
 
@@ -61,98 +60,6 @@ Or from a clone:
 git clone https://github.com/rmmorrison/dnssie
 cd dnssie
 go build -o dnssie ./cmd/dnssie
-```
-
-## Quick start
-
-1. Launch the terminal UI:
-
-   ```sh
-   dnssie
-   ```
-
-2. Choose **Create a new record** and fill in the form: pick a type and enter
-   the fully-qualified name (e.g. `app.test.`) and value (e.g. `127.0.0.1`).
-   TTL and erratic mode are optional — leave them blank. Use `↑`/`↓` or `Tab`
-   to move between fields and `enter` to save.
-
-3. Open **DNS server** and press `s` to start the server. It listens on
-   `127.0.0.1:1053` by default.
-
-4. Query it from another terminal:
-
-   ```sh
-   dig @127.0.0.1 -p 1053 app.test
-   ```
-
-   Names you haven't defined are forwarded upstream:
-
-   ```sh
-   dig @127.0.0.1 -p 1053 example.com
-   ```
-
-The server runs independently of the UI, so it keeps serving after you quit.
-The next time you launch `dnssie`, the **DNS server** screen shows whether it
-is running, streams recent lookups as they happen, and lets you stop it.
-
-## Supported record types
-
-`A`, `AAAA`, `CNAME`, `PTR`, `NS`, `MX`, `SOA`, `TXT`.
-
-Names can be wildcards: a record named `*.app.test.` answers any name under
-`app.test.` (e.g. `api.app.test.`, `a.b.app.test.`). An exact record always
-wins over a wildcard, a more specific wildcard wins over a broader one, and a
-wildcard never answers its own parent name (`app.test.` here) — add an
-explicit record for that.
-
-Each record has its own TTL (seconds). Leave it blank when creating or
-editing a record to use the default (300); set it explicitly — including `0`
-— to test client/resolver caching behavior. Records created by older versions
-have no stored TTL and keep using the default.
-
-### Erratic mode (fault injection)
-
-Any record can be made deliberately flaky to test how your app copes with a
-misbehaving resolver. Editing a record (from **Manage existing records**) ends
-with an *erratic mode* prompt: enter a percentage `1–100` and that share of
-matching queries will return `SERVFAIL` instead of the real answer; leave it
-blank (or `0`) to keep the record reliable. Only names with a matching local
-record are affected — forwarded queries are never failed. The records table
-shows the rate in its `FAIL%` column, and an injected failure is logged as
-`erratic` in the live lookups on the **DNS server** screen.
-
-## Configuration
-
-`dnssie` manages everything through the UI; you don't need to edit files by
-hand. For reference, records and settings are stored as TOML in:
-
-- macOS / Linux: `~/.config/dnssie/` (honors `$XDG_CONFIG_HOME`)
-- Windows: `%AppData%\dnssie\`
-
-Set `DNSSIE_CONFIG_DIR` to override this with an exact directory of your
-choice (takes precedence on every platform).
-
-From the **DNS server** screen you can change the listen port and choose how
-unmatched queries are handled: forwarded to your system resolvers, forwarded
-to a manual list of upstreams, or not forwarded at all (anything without a
-local record returns `NXDOMAIN`).
-
-## Notes
-
-- The default port is `1053` so it runs without root/admin. You can set it to
-  the standard DNS port `53` in the UI, but binding `53` requires elevated
-  privileges.
-- The server only listens on `127.0.0.1` (localhost).
-- Record changes take effect immediately on a running server. Changing the
-  listen port requires a restart, which the UI will prompt you to do.
-
-## Running the server without the UI
-
-The UI starts the server for you, but you can also run it directly:
-
-```sh
-dnssie serve            # uses your saved configuration
-dnssie serve --port 53  # override the listen port
 ```
 
 ## License
