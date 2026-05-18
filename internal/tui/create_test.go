@@ -42,49 +42,78 @@ func TestParseErratic(t *testing.T) {
 	}
 }
 
-func TestTTLSummary(t *testing.T) {
-	if got := ttlSummary(""); got != "default (300)" {
-		t.Errorf(`ttlSummary("") = %q, want "default (300)"`, got)
-	}
-	if got := ttlSummary("bad"); got != "default (300)" {
-		t.Errorf(`ttlSummary("bad") = %q, want "default (300)"`, got)
-	}
-	if got := ttlSummary("60"); got != "60" {
-		t.Errorf(`ttlSummary("60") = %q, want "60"`, got)
-	}
-}
-
-func TestCreateFlowTTLStep(t *testing.T) {
+func TestCreateFormSubmits(t *testing.T) {
 	m := newCreateRecord()
-	m.step = stepEnterName
-	m.chosen = supportedTypes[0] // A
-	m.name.SetValue("app.test")
-	m, _ = m.updateEnterName(key("enter"))
-	if m.step != stepEnterValue {
-		t.Fatalf("step = %v, want stepEnterValue", m.step)
+	if m.step != stepForm {
+		t.Fatalf("step = %v, want stepForm", m.step)
 	}
 
-	m.value.SetValue("127.0.0.1")
-	m, _ = m.updateEnterValue(key("enter"))
-	if m.step != stepEnterTTL {
-		t.Fatalf("step = %v, want stepEnterTTL", m.step)
+	// The type cycler starts focused; ←/→ changes the type.
+	if m.form.recordType().name != "A" {
+		t.Fatalf("default type = %q, want A", m.form.recordType().name)
+	}
+	m, _ = m.Update(key("right"))
+	if m.form.recordType().name != "AAAA" {
+		t.Errorf("after →, type = %q, want AAAA", m.form.recordType().name)
+	}
+	m, _ = m.Update(key("left"))
+	if m.form.recordType().name != "A" {
+		t.Errorf("after ←, type = %q, want A", m.form.recordType().name)
 	}
 
-	// An invalid TTL keeps the step and flags the error.
-	m.ttl.SetValue("oops")
-	m, _ = m.updateEnterTTL(key("enter"))
-	if m.step != stepEnterTTL || !m.ttlErr {
-		t.Fatalf("invalid TTL: step=%v ttlErr=%v, want stepEnterTTL/true", m.step, m.ttlErr)
-	}
-
-	// A valid TTL clears the error and proceeds to save.
-	m.ttl.SetValue("90")
-	m, cmd := m.updateEnterTTL(key("enter"))
-	if m.step != stepSaving || m.ttlErr {
-		t.Fatalf("valid TTL: step=%v ttlErr=%v, want stepSaving/false", m.step, m.ttlErr)
+	m.form.name.SetValue("app.test") // no trailing dot; fqdn() adds it
+	m.form.value.SetValue("127.0.0.1")
+	m.form.ttl.SetValue("90")
+	m.form.erratic.SetValue("25")
+	m, cmd := m.Update(key("enter"))
+	if m.step != stepSaving {
+		t.Fatalf("step = %v, want stepSaving", m.step)
 	}
 	if cmd == nil {
 		t.Error("expected a save command")
+	}
+	if m.pending.Type != "A" || m.pending.Name != "app.test." || m.pending.Value != "127.0.0.1" {
+		t.Errorf("pending = %+v, want A app.test. 127.0.0.1", m.pending)
+	}
+	if m.pending.TTL == nil || *m.pending.TTL != 90 {
+		t.Errorf("pending TTL = %v, want 90", m.pending.TTL)
+	}
+	if m.pending.Erratic() != 25 {
+		t.Errorf("pending erratic = %d, want 25", m.pending.Erratic())
+	}
+
+	if m, _ = m.Update(recordSavedMsg{}); m.step != stepDone {
+		t.Errorf("step = %v, want stepDone after save", m.step)
+	}
+}
+
+func TestCreateFormRejectsBadInput(t *testing.T) {
+	m := newCreateRecord()
+
+	// Blank name -> stays on the form, error shown, focus moved there.
+	m.form.value.SetValue("127.0.0.1")
+	m, _ = m.Update(key("enter"))
+	if m.step != stepForm || m.form.errMsg == "" || m.form.focus != fldName {
+		t.Fatalf("blank name: step=%v err=%q focus=%d", m.step, m.form.errMsg, m.form.focus)
+	}
+
+	// Bad TTL -> same, focus on the TTL field.
+	m.form.name.SetValue("app.test")
+	m.form.ttl.SetValue("oops")
+	m, _ = m.Update(key("enter"))
+	if m.step != stepForm || m.form.errMsg == "" || m.form.focus != fldTTL {
+		t.Fatalf("bad TTL: step=%v err=%q focus=%d", m.step, m.form.errMsg, m.form.focus)
+	}
+}
+
+func TestCreateFormCancel(t *testing.T) {
+	m := newCreateRecord()
+	m, cmd := m.Update(key("esc"))
+	if cmd == nil {
+		t.Error("esc should emit a screen-change command")
+	}
+	if m.step != stepForm {
+		t.Errorf("step = %v, want stepForm (the app owns navigation)", m.step)
 	}
 }
 

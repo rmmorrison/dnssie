@@ -71,8 +71,10 @@ go build -o dnssie ./cmd/dnssie
    dnssie
    ```
 
-2. Choose **Create a new record**, pick a type, and enter the fully-qualified
-   name (e.g. `app.test.`) and value (e.g. `127.0.0.1`).
+2. Choose **Create a new record** and fill in the form: pick a type and enter
+   the fully-qualified name (e.g. `app.test.`) and value (e.g. `127.0.0.1`).
+   TTL and erratic mode are optional — leave them blank. Use `↑`/`↓` or `Tab`
+   to move between fields and `enter` to save.
 
 3. Open **DNS server** and press `s` to start the server. It listens on
    `127.0.0.1:1053` by default.

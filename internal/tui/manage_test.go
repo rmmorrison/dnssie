@@ -214,39 +214,33 @@ func TestDeleteCancelKeepsRecords(t *testing.T) {
 }
 
 func TestEditUpdatesSelectedRecord(t *testing.T) {
+	ttl := uint32(60)
+	pct := 10
 	m := browsing([]store.Record{
-		{Type: "A", Name: "old.example.com.", Value: "1.1.1.1"},
+		{Type: "A", Name: "old.example.com.", Value: "1.1.1.1", TTL: &ttl, ErraticPct: &pct},
 	})
 	idx, _ := m.selected()
 
 	m, _ = m.updateBrowsing(key("e"))
-	if m.step != manageEditingName {
-		t.Fatalf("step = %v, want manageEditingName", m.step)
+	if m.step != manageEditing {
+		t.Fatalf("step = %v, want manageEditing", m.step)
 	}
-	if m.name.Value() != "old.example.com." {
-		t.Errorf("name field = %q, want prefilled with current name", m.name.Value())
+	// Type is locked to the record's type and the fields are prefilled.
+	if m.form.recordType().name != "A" || !m.form.typeLocked {
+		t.Errorf("form type = %q locked=%v, want A/true", m.form.recordType().name, m.form.typeLocked)
 	}
-
-	// Enter a new name without a trailing dot; fqdn() should add it.
-	m.name.SetValue("new.example.com")
-	m, _ = m.updateEditName(key("enter"))
-	if m.step != manageEditingValue {
-		t.Fatalf("step = %v, want manageEditingValue", m.step)
-	}
-
-	m.value.SetValue("2.2.2.2")
-	m, _ = m.updateEditValue(key("enter"))
-	if m.step != manageEditingTTL {
-		t.Fatalf("step = %v, want manageEditingTTL", m.step)
+	if m.form.name.Value() != "old.example.com." || m.form.value.Value() != "1.1.1.1" ||
+		m.form.ttl.Value() != "60" || m.form.erratic.Value() != "10" {
+		t.Errorf("form not prefilled: name=%q value=%q ttl=%q erratic=%q",
+			m.form.name.Value(), m.form.value.Value(), m.form.ttl.Value(), m.form.erratic.Value())
 	}
 
-	m.ttl.SetValue("75")
-	m, _ = m.updateEditTTL(key("enter"))
-	if m.step != manageEditingErratic {
-		t.Fatalf("step = %v, want manageEditingErratic", m.step)
-	}
-
-	m, cmd := m.updateEditErratic(key("enter")) // blank -> erratic off
+	// Change the fields and submit.
+	m.form.name.SetValue("new.example.com") // no trailing dot; fqdn() adds it
+	m.form.value.SetValue("2.2.2.2")
+	m.form.ttl.SetValue("75")
+	m.form.erratic.SetValue("") // clear -> off
+	m, cmd := m.updateEditing(key("enter"))
 	if m.step != manageSaving {
 		t.Fatalf("step = %v, want manageSaving", m.step)
 	}
@@ -255,84 +249,41 @@ func TestEditUpdatesSelectedRecord(t *testing.T) {
 	}
 	got := m.records[idx]
 	if got.Name != "new.example.com." || got.Value != "2.2.2.2" || got.Type != "A" {
-		t.Errorf("record = %+v, want name new.example.com. value 2.2.2.2 type A", got)
+		t.Errorf("record = %+v, want new.example.com. 2.2.2.2 A", got)
 	}
 	if got.TTL == nil || *got.TTL != 75 {
 		t.Errorf("record TTL = %v, want 75", got.TTL)
 	}
 	if got.Erratic() != 0 {
-		t.Errorf("record erratic = %d, want 0 (blank)", got.Erratic())
+		t.Errorf("record erratic = %d, want 0 (cleared)", got.Erratic())
 	}
 }
 
-func TestEditTTLBlankMeansDefault(t *testing.T) {
-	ttl := uint32(120)
+func TestEditFormRejectsBadInput(t *testing.T) {
 	m := browsing([]store.Record{
-		{Type: "A", Name: "a.example.com.", Value: "1.1.1.1", TTL: &ttl},
+		{Type: "A", Name: "a.example.com.", Value: "1.1.1.1"},
 	})
 	idx, _ := m.selected()
-
 	m, _ = m.updateBrowsing(key("e"))
-	m, _ = m.updateEditName(key("enter"))
-	if m.step != manageEditingValue {
-		t.Fatalf("step = %v, want manageEditingValue", m.step)
-	}
-	m, _ = m.updateEditValue(key("enter"))
-	if m.step != manageEditingTTL {
-		t.Fatalf("step = %v, want manageEditingTTL", m.step)
-	}
-	// The current TTL is prefilled so it can be tweaked rather than retyped.
-	if m.ttl.Value() != "120" {
-		t.Errorf("TTL field = %q, want prefilled 120", m.ttl.Value())
+
+	// Out-of-range erratic: stays editing, error shown, focus on that field.
+	m.form.erratic.SetValue("150")
+	m, _ = m.updateEditing(key("enter"))
+	if m.step != manageEditing || m.form.errMsg == "" || m.form.focus != fldErratic {
+		t.Fatalf("bad erratic: step=%v err=%q focus=%d", m.step, m.form.errMsg, m.form.focus)
 	}
 
-	// Clearing it means "use the default" (nil, not 0).
-	m.ttl.SetValue("")
-	m, _ = m.updateEditTTL(key("enter"))
-	if m.step != manageEditingErratic {
-		t.Fatalf("step = %v, want manageEditingErratic", m.step)
-	}
-	m, _ = m.updateEditErratic(key("enter")) // leave erratic off
+	// Fix it; blank TTL means the default (nil, not 0).
+	m.form.erratic.SetValue("")
+	m, _ = m.updateEditing(key("enter"))
 	if m.step != manageSaving {
 		t.Fatalf("step = %v, want manageSaving", m.step)
 	}
 	if m.records[idx].TTL != nil {
 		t.Errorf("TTL = %d, want nil (default)", *m.records[idx].TTL)
 	}
-}
-
-func TestEditErraticPercent(t *testing.T) {
-	m := browsing([]store.Record{
-		{Type: "A", Name: "a.example.com.", Value: "1.1.1.1"},
-	})
-	idx, _ := m.selected()
-
-	m, _ = m.updateBrowsing(key("e"))
-	m, _ = m.updateEditName(key("enter"))
-	m, _ = m.updateEditValue(key("enter"))
-	if m.step != manageEditingTTL {
-		t.Fatalf("step = %v, want manageEditingTTL", m.step)
-	}
-	m, _ = m.updateEditTTL(key("enter")) // default TTL
-	if m.step != manageEditingErratic {
-		t.Fatalf("step = %v, want manageEditingErratic", m.step)
-	}
-
-	// Out-of-range input is rejected and keeps the step.
-	m.erratic.SetValue("150")
-	m, _ = m.updateEditErratic(key("enter"))
-	if m.step != manageEditingErratic || !m.erraticErr {
-		t.Fatalf("invalid erratic: step=%v erraticErr=%v, want manageEditingErratic/true", m.step, m.erraticErr)
-	}
-
-	// A valid percentage is stored.
-	m.erratic.SetValue("40")
-	m, _ = m.updateEditErratic(key("enter"))
-	if m.step != manageSaving {
-		t.Fatalf("step = %v, want manageSaving", m.step)
-	}
-	if m.records[idx].Erratic() != 40 {
-		t.Errorf("erratic = %d, want 40", m.records[idx].Erratic())
+	if m.records[idx].Erratic() != 0 {
+		t.Errorf("erratic = %d, want 0", m.records[idx].Erratic())
 	}
 }
 
@@ -342,8 +293,8 @@ func TestEditCancelKeepsRecord(t *testing.T) {
 	idx, _ := m.selected()
 
 	m, _ = m.updateBrowsing(key("e"))
-	m.name.SetValue("changed.example.com")
-	m, _ = m.updateEditName(key("esc")) // cancel
+	m.form.name.SetValue("changed.example.com")
+	m, _ = m.updateEditing(key("esc")) // cancel
 
 	if m.step != manageBrowsing {
 		t.Errorf("step = %v, want manageBrowsing", m.step)

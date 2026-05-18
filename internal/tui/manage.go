@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
@@ -63,10 +62,7 @@ type manageStep int
 const (
 	manageLoading manageStep = iota
 	manageBrowsing
-	manageEditingName
-	manageEditingValue
-	manageEditingTTL
-	manageEditingErratic
+	manageEditing
 	manageConfirmDelete
 	manageSaving
 )
@@ -111,48 +107,22 @@ func erraticFieldValue(r store.Record) string {
 // one tab per record type; each tab shows its records in a table that can be
 // navigated to edit or (with confirmation) delete the highlighted record.
 type manage struct {
-	step       manageStep
-	records    []store.Record // canonical set as loaded from disk
-	activeTab  int            // index into supportedTypes
-	cursor     int            // row within the active tab
-	scroll     int            // top row of the visible table window
-	editIdx    int            // index into records being edited/deleted
-	name       textinput.Model
-	value      textinput.Model
-	ttl        textinput.Model
-	ttlErr     bool
-	erratic    textinput.Model
-	erraticErr bool
-	loadErr    error
-	opErr      error // error from the last edit/delete save
-	st         styles
-	width      int
-	height     int
+	step      manageStep
+	records   []store.Record // canonical set as loaded from disk
+	activeTab int            // index into supportedTypes
+	cursor    int            // row within the active tab
+	scroll    int            // top row of the visible table window
+	editIdx   int            // index into records being edited/deleted
+	form      recordForm     // the edit form (active while step == manageEditing)
+	loadErr   error
+	opErr     error // error from the last edit/delete save
+	st        styles
+	width     int
+	height    int
 }
 
 func newManage() manage {
-	name := textinput.New()
-	name.CharLimit = 253
-
-	value := textinput.New()
-	value.CharLimit = 512
-
-	ttl := textinput.New()
-	ttl.CharLimit = 10
-	ttl.Placeholder = ttlPlaceholder
-
-	erratic := textinput.New()
-	erratic.CharLimit = 3
-	erratic.Placeholder = erraticPlaceholder
-
-	return manage{
-		step:    manageLoading,
-		name:    name,
-		value:   value,
-		ttl:     ttl,
-		erratic: erratic,
-		st:      newStyles(true),
-	}
+	return manage{step: manageLoading, st: newStyles(true)}
 }
 
 func (m manage) Init() tea.Cmd {
@@ -252,15 +222,14 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		w := min(msg.Width-8, 60)
-		m.name.SetWidth(w)
-		m.value.SetWidth(w)
-		m.ttl.SetWidth(w)
-		m.erratic.SetWidth(w)
+		if m.step == manageEditing {
+			m.form.setWidth(min(msg.Width-8, 60))
+		}
 		return m, nil
 
 	case themeMsg:
 		m.st = msg.st
+		m.form.setStyles(msg.st)
 		return m, nil
 
 	case recordsLoadedMsg:
@@ -290,14 +259,8 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 		switch m.step {
 		case manageBrowsing:
 			return m.updateBrowsing(msg)
-		case manageEditingName:
-			return m.updateEditName(msg)
-		case manageEditingValue:
-			return m.updateEditValue(msg)
-		case manageEditingTTL:
-			return m.updateEditTTL(msg)
-		case manageEditingErratic:
-			return m.updateEditErratic(msg)
+		case manageEditing:
+			return m.updateEditing(msg)
 		case manageConfirmDelete:
 			return m.updateConfirmDelete(msg)
 		case manageLoading, manageSaving:
@@ -308,19 +271,13 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 		}
 	}
 
-	// Keep the focused text input ticking (e.g. cursor blink).
-	var cmd tea.Cmd
-	switch m.step {
-	case manageEditingName:
-		m.name, cmd = m.name.Update(msg)
-	case manageEditingValue:
-		m.value, cmd = m.value.Update(msg)
-	case manageEditingTTL:
-		m.ttl, cmd = m.ttl.Update(msg)
-	case manageEditingErratic:
-		m.erratic, cmd = m.erratic.Update(msg)
+	// Keep the focused form input ticking (e.g. cursor blink).
+	if m.step == manageEditing {
+		var cmd tea.Cmd
+		m.form, cmd = m.form.updateInput(msg)
+		return m, cmd
 	}
-	return m, cmd
+	return m, nil
 }
 
 func (m manage) updateBrowsing(msg tea.KeyPressMsg) (manage, tea.Cmd) {
@@ -356,10 +313,10 @@ func (m manage) updateBrowsing(msg tea.KeyPressMsg) (manage, tea.Cmd) {
 		}
 		m.opErr = nil
 		m.editIdx = idx
-		m.name.SetValue(m.records[idx].Name)
-		m.name.CursorEnd()
-		m.step = manageEditingName
-		return m, m.name.Focus()
+		var cmd tea.Cmd
+		m.form, cmd = editRecordForm(m.records[idx], m.st, min(m.width-8, 60))
+		m.step = manageEditing
+		return m, cmd
 	case "d":
 		idx, ok := m.selected()
 		if !ok {
@@ -382,138 +339,29 @@ func (m manage) editTarget() (store.Record, bool) {
 	return m.records[m.editIdx], true
 }
 
-func (m manage) updateEditName(msg tea.KeyPressMsg) (manage, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
+// updateEditing delegates to the shared form. Nothing is mutated until the
+// form is submitted, so cancelling simply returns to browsing.
+func (m manage) updateEditing(msg tea.KeyPressMsg) (manage, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
-	case "esc":
-		// Cancel the edit entirely; nothing is mutated until the final save.
-		m.name.Blur()
+	}
+	var action formAction
+	var cmd tea.Cmd
+	m.form, action, cmd = m.form.handleKey(msg)
+	switch action {
+	case formCancel:
 		m.step = manageBrowsing
 		return m, nil
-	case "enter":
-		if strings.TrimSpace(m.name.Value()) == "" {
-			return m, nil
-		}
-		rec, ok := m.editTarget()
-		if !ok {
-			m.name.Blur()
-			m.step = manageBrowsing
-			return m, nil
-		}
-		m.name.Blur()
-		m.value.SetValue(rec.Value)
-		m.value.CursorEnd()
-		m.step = manageEditingValue
-		return m, m.value.Focus()
-	}
-
-	var cmd tea.Cmd
-	m.name, cmd = m.name.Update(msg)
-	return m, cmd
-}
-
-func (m manage) updateEditValue(msg tea.KeyPressMsg) (manage, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc":
-		// Step back to the name field.
-		m.value.Blur()
-		m.step = manageEditingName
-		return m, m.name.Focus()
-	case "enter":
-		if strings.TrimSpace(m.value.Value()) == "" {
-			return m, nil
-		}
-		rec, ok := m.editTarget()
-		if !ok {
-			m.value.Blur()
-			m.step = manageBrowsing
-			return m, nil
-		}
-		m.value.Blur()
-		m.ttl.SetValue(ttlFieldValue(rec))
-		m.ttl.CursorEnd()
-		m.ttlErr = false
-		m.step = manageEditingTTL
-		return m, m.ttl.Focus()
-	}
-
-	var cmd tea.Cmd
-	m.value, cmd = m.value.Update(msg)
-	return m, cmd
-}
-
-func (m manage) updateEditTTL(msg tea.KeyPressMsg) (manage, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc":
-		// Step back to the value field.
-		m.ttl.Blur()
-		m.ttlErr = false
-		m.step = manageEditingValue
-		return m, m.value.Focus()
-	case "enter":
-		if _, ok := parseTTL(m.ttl.Value()); !ok {
-			m.ttlErr = true
-			return m, nil
-		}
-		rec, ok := m.editTarget()
-		if !ok {
-			m.ttl.Blur()
-			m.step = manageBrowsing
-			return m, nil
-		}
-		m.ttl.Blur()
-		m.ttlErr = false
-		m.erratic.SetValue(erraticFieldValue(rec))
-		m.erratic.CursorEnd()
-		m.erraticErr = false
-		m.step = manageEditingErratic
-		return m, m.erratic.Focus()
-	}
-
-	var cmd tea.Cmd
-	m.ttl, cmd = m.ttl.Update(msg)
-	return m, cmd
-}
-
-func (m manage) updateEditErratic(msg tea.KeyPressMsg) (manage, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc":
-		// Step back to the TTL field.
-		m.erratic.Blur()
-		m.erraticErr = false
-		m.step = manageEditingTTL
-		return m, m.ttl.Focus()
-	case "enter":
-		pct, ok := parseErratic(m.erratic.Value())
-		if !ok {
-			m.erraticErr = true
-			return m, nil
-		}
-		ttl, _ := parseTTL(m.ttl.Value()) // already validated at the TTL step
+	case formSubmit:
 		if _, ok := m.editTarget(); !ok {
-			m.erratic.Blur()
 			m.step = manageBrowsing
 			return m, nil
 		}
-		m.erratic.Blur()
-		m.erraticErr = false
-		m.records[m.editIdx].Name = fqdn(m.name.Value())
-		m.records[m.editIdx].Value = m.value.Value()
-		m.records[m.editIdx].TTL = ttl
-		m.records[m.editIdx].ErraticPct = erraticPtr(pct)
+		rec, _, _ := m.form.build()
+		m.records[m.editIdx] = rec
 		m.step = manageSaving
 		return m, saveRecordsCmd(m.records)
 	}
-
-	var cmd tea.Cmd
-	m.erratic, cmd = m.erratic.Update(msg)
 	return m, cmd
 }
 
@@ -652,55 +500,10 @@ func (m manage) View() string {
 		b.WriteString(m.st.subtitle.Render("Saving…"))
 		return b.String()
 
-	case manageEditingName:
-		rec, _ := m.editTarget()
-		b.WriteString(m.st.subtitle.Render("Editing "))
-		b.WriteString(m.st.selected.Render(rec.Type))
-		b.WriteString(m.st.subtitle.Render(" record"))
+	case manageEditing:
+		b.WriteString(m.st.subtitle.Render("Editing record"))
 		b.WriteString("\n\n")
-		b.WriteString("Name (fully-qualified)\n")
-		b.WriteString(m.name.View())
-		return b.String()
-
-	case manageEditingValue:
-		rec, _ := m.editTarget()
-		b.WriteString(m.st.subtitle.Render("Editing "))
-		b.WriteString(m.st.selected.Render(rec.Type))
-		b.WriteString(m.st.subtitle.Render(" record   Name: "))
-		b.WriteString(m.name.Value())
-		b.WriteString("\n\n")
-		b.WriteString("Value\n")
-		b.WriteString(m.value.View())
-		return b.String()
-
-	case manageEditingTTL:
-		rec, _ := m.editTarget()
-		b.WriteString(m.st.subtitle.Render("Editing "))
-		b.WriteString(m.st.selected.Render(rec.Type))
-		b.WriteString(m.st.subtitle.Render(" record   Name: "))
-		b.WriteString(m.name.Value())
-		b.WriteString("\n\n")
-		b.WriteString("TTL (seconds)\n")
-		b.WriteString(m.ttl.View())
-		if m.ttlErr {
-			b.WriteString("\n\n")
-			b.WriteString(m.st.danger.Render("TTL must be a whole number of seconds (or blank for the default)."))
-		}
-		return b.String()
-
-	case manageEditingErratic:
-		rec, _ := m.editTarget()
-		b.WriteString(m.st.subtitle.Render("Editing "))
-		b.WriteString(m.st.selected.Render(rec.Type))
-		b.WriteString(m.st.subtitle.Render(" record   Name: "))
-		b.WriteString(m.name.Value())
-		b.WriteString("\n\n")
-		b.WriteString("Erratic mode — % of matching queries to fail with SERVFAIL\n")
-		b.WriteString(m.erratic.View())
-		if m.erraticErr {
-			b.WriteString("\n\n")
-			b.WriteString(m.st.danger.Render("Enter a whole number 0–100 (or blank to turn erratic mode off)."))
-		}
+		b.WriteString(m.form.View())
 		return b.String()
 
 	case manageConfirmDelete:
@@ -762,14 +565,8 @@ func (m manage) footer() string {
 	switch m.step {
 	case manageLoading, manageSaving:
 		return ""
-	case manageEditingName:
-		return "enter continue · esc cancel"
-	case manageEditingValue:
-		return "enter continue · esc change name"
-	case manageEditingTTL:
-		return "enter continue · esc change value"
-	case manageEditingErratic:
-		return "enter save · esc change TTL"
+	case manageEditing:
+		return m.form.footerHint()
 	case manageConfirmDelete:
 		return "enter delete · esc cancel"
 	}
