@@ -29,6 +29,16 @@ func saveRecordCmd(r store.Record) tea.Cmd {
 	}
 }
 
+// fqdn canonicalizes a record name by trimming surrounding whitespace and
+// ensuring a single trailing dot, so stored names match incoming queries.
+func fqdn(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.HasSuffix(name, ".") {
+		return name
+	}
+	return name + "."
+}
+
 // recordType is a DNS record type the user can create, with an example shown
 // as placeholder text for the value input.
 type recordType struct {
@@ -77,7 +87,7 @@ type createRecord struct {
 func newCreateRecord() createRecord {
 	name := textinput.New()
 	name.CharLimit = 253
-	name.Placeholder = "record name, e.g. www, mail, or @ for the zone apex"
+	name.Placeholder = "full name, e.g. www.example.com. or example.com."
 
 	value := textinput.New()
 	value.CharLimit = 512
@@ -208,7 +218,7 @@ func (m createRecord) updateEnterValue(msg tea.KeyPressMsg) (createRecord, tea.C
 		m.step = stepSaving
 		return m, saveRecordCmd(store.Record{
 			Type:  m.chosen.name,
-			Name:  strings.TrimSpace(m.name.Value()),
+			Name:  fqdn(m.name.Value()),
 			Value: m.value.Value(),
 		})
 	}
@@ -256,7 +266,7 @@ func (m createRecord) View() string {
 		b.WriteString(subtitleStyle.Render("Type: "))
 		b.WriteString(selectedItemStyle.Render(m.chosen.name))
 		b.WriteString("\n\n")
-		b.WriteString("Name\n")
+		b.WriteString("Name (fully-qualified)\n")
 		b.WriteString(m.name.View())
 		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("enter: continue • esc: change type"))
