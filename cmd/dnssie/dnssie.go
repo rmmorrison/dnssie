@@ -1,5 +1,0 @@
-package dnssie
-
-func main() {
-
-}
