@@ -97,6 +97,12 @@ is running, streams recent lookups as they happen, and lets you stop it.
 
 `A`, `AAAA`, `CNAME`, `PTR`, `NS`, `MX`, `SOA`, `TXT`.
 
+Names can be wildcards: a record named `*.app.test.` answers any name under
+`app.test.` (e.g. `api.app.test.`, `a.b.app.test.`). An exact record always
+wins over a wildcard, a more specific wildcard wins over a broader one, and a
+wildcard never answers its own parent name (`app.test.` here) — add an
+explicit record for that.
+
 ## Configuration
 
 `dnssie` manages everything through the UI; you don't need to edit files by

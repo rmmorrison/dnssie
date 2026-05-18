@@ -26,14 +26,81 @@ var supportedQType = map[string]uint16{
 	"TXT":   dns.TypeTXT,
 }
 
-// matches reports whether rec answers a question for qname/qtype. qname must
-// already be canonical (lowercase, trailing dot); store names are FQDNs.
-func matches(rec store.Record, qname string, qtype uint16) bool {
+// recType returns the DNS type code for rec, or false if dnssie doesn't serve
+// that record type.
+func recType(rec store.Record) (uint16, bool) {
 	t, ok := supportedQType[strings.ToUpper(strings.TrimSpace(rec.Type))]
+	return t, ok
+}
+
+// matches reports whether rec answers a question for qname/qtype by exact
+// name. qname must already be canonical (lowercase, trailing dot); store
+// names are FQDNs.
+func matches(rec store.Record, qname string, qtype uint16) bool {
+	t, ok := recType(rec)
 	if !ok || t != qtype {
 		return false
 	}
 	return dns.CanonicalName(rec.Name) == qname
+}
+
+// wildcardBase reports whether canonical name cn is a wildcard ("*.something")
+// and returns the suffix it stands in for, keeping the trailing dot. "*."
+// itself yields an empty base — a catch-all that matches every name.
+func wildcardBase(cn string) (string, bool) {
+	if !strings.HasPrefix(cn, "*.") {
+		return "", false
+	}
+	return cn[2:], true
+}
+
+// underWildcard reports whether qname is covered by a wildcard whose base is
+// the given suffix. qname must sit strictly below base (at least one label in
+// place of "*"); the wildcard never matches base itself, its parent name.
+func underWildcard(qname, base string) bool {
+	return qname != base && strings.HasSuffix(qname, "."+base)
+}
+
+// answerRecords selects the stored records that should answer qname/qtype.
+//
+// Wildcard precedence follows RFC 4592, simplified for a local dev tool: an
+// exact name match always wins; otherwise the most specific ("longest")
+// wildcard whose suffix the query falls under is used. We deliberately skip
+// the closest-encloser empty-non-terminal rule — for local development,
+// "*.app.test." catching "a.b.app.test." is the least surprising behavior.
+//
+// qname must already be canonical (lowercase, trailing dot).
+func answerRecords(recs []store.Record, qname string, qtype uint16) []store.Record {
+	var exact, wild []store.Record
+	bestBase := ""
+	haveWild := false
+	for _, rec := range recs {
+		t, ok := recType(rec)
+		if !ok || t != qtype {
+			continue
+		}
+		cn := dns.CanonicalName(rec.Name)
+		if cn == qname {
+			exact = append(exact, rec)
+			continue
+		}
+		base, ok := wildcardBase(cn)
+		if !ok || !underWildcard(qname, base) {
+			continue
+		}
+		// A query name has exactly one suffix of any given length, so a
+		// longer base is unambiguously the more specific wildcard.
+		switch {
+		case !haveWild || len(base) > len(bestBase):
+			bestBase, wild, haveWild = base, []store.Record{rec}, true
+		case base == bestBase:
+			wild = append(wild, rec)
+		}
+	}
+	if len(exact) > 0 {
+		return exact
+	}
+	return wild
 }
 
 // buildRR converts a stored record into a dns.RR for the question. A

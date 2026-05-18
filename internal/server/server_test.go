@@ -146,6 +146,47 @@ func TestServerOffModeReturnsNXDOMAIN(t *testing.T) {
 	}
 }
 
+func TestServerWildcardRecord(t *testing.T) {
+	recDir := t.TempDir()
+	if err := store.New(recDir).Save([]store.Record{
+		{Type: "A", Name: "*.app.test.", Value: "192.0.2.50"},
+		{Type: "A", Name: "real.app.test.", Value: "192.0.2.7"},
+	}); err != nil {
+		t.Fatalf("seed records: %v", err)
+	}
+	cfgDir := t.TempDir()
+	if err := config.New(cfgDir).Save(config.Config{
+		Port:      5353,
+		Resolvers: config.Resolvers{Mode: config.ModeOff}, // isolate: no forwarding
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	addr := runServer(t, recDir, cfgDir)
+
+	// A name with no explicit record is synthesized from the wildcard, and
+	// the answer's owner name is the queried name, not "*.app.test.".
+	resp := query(t, addr, "anything.app.test", dns.TypeA)
+	if resp.Rcode != dns.RcodeSuccess || len(resp.Answer) != 1 {
+		t.Fatalf("wildcard query: rcode=%d answers=%d", resp.Rcode, len(resp.Answer))
+	}
+	a, ok := resp.Answer[0].(*dns.A)
+	if !ok || a.A.String() != "192.0.2.50" {
+		t.Fatalf("wildcard answer = %v, want 192.0.2.50", resp.Answer[0])
+	}
+	if a.Hdr.Name != "anything.app.test." {
+		t.Errorf("owner name = %q, want the queried name", a.Hdr.Name)
+	}
+
+	// An explicit record still wins over the wildcard.
+	resp = query(t, addr, "real.app.test", dns.TypeA)
+	if len(resp.Answer) != 1 {
+		t.Fatalf("exact query answers=%d", len(resp.Answer))
+	}
+	if a := resp.Answer[0].(*dns.A); a.A.String() != "192.0.2.7" {
+		t.Errorf("exact answer = %v, want 192.0.2.7", a)
+	}
+}
+
 func TestServerServfailWhenNoUpstreams(t *testing.T) {
 	cfgDir := t.TempDir()
 	if err := config.New(cfgDir).Save(config.Config{

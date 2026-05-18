@@ -198,11 +198,9 @@ func (s *Server) handle(w dns.ResponseWriter, req *dns.Msg) {
 	defer func() { s.logQuery(q, outcome) }()
 
 	var answers []dns.RR
-	for _, rec := range s.recs.snapshot() {
-		if matches(rec, qname, q.Qtype) {
-			if rr := buildRR(rec, qname, q.Qtype, defaultTTL); rr != nil {
-				answers = append(answers, rr)
-			}
+	for _, rec := range answerRecords(s.recs.snapshot(), qname, q.Qtype) {
+		if rr := buildRR(rec, qname, q.Qtype, defaultTTL); rr != nil {
+			answers = append(answers, rr)
 		}
 	}
 	if len(answers) > 0 {

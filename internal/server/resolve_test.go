@@ -24,6 +24,56 @@ func TestMatches(t *testing.T) {
 	}
 }
 
+func TestAnswerRecordsWildcard(t *testing.T) {
+	recs := []store.Record{
+		{Type: "A", Name: "*.app.test.", Value: "10.0.0.1"},
+		{Type: "A", Name: "api.app.test.", Value: "10.0.0.2"},
+		{Type: "A", Name: "*.test.", Value: "10.0.0.9"},
+		{Type: "AAAA", Name: "*.app.test.", Value: "2001:db8::1"},
+	}
+	only := func(rs []store.Record) string {
+		t.Helper()
+		if len(rs) != 1 {
+			t.Fatalf("want 1 record, got %d (%v)", len(rs), rs)
+		}
+		return rs[0].Value
+	}
+
+	if got := only(answerRecords(recs, "api.app.test.", dns.TypeA)); got != "10.0.0.2" {
+		t.Errorf("exact beats wildcard: got %s, want 10.0.0.2", got)
+	}
+	if got := only(answerRecords(recs, "x.app.test.", dns.TypeA)); got != "10.0.0.1" {
+		t.Errorf("most specific wildcard wins: got %s, want 10.0.0.1", got)
+	}
+	if got := only(answerRecords(recs, "a.b.app.test.", dns.TypeA)); got != "10.0.0.1" {
+		t.Errorf("multi-label under wildcard: got %s, want 10.0.0.1", got)
+	}
+	if got := only(answerRecords(recs, "other.test.", dns.TypeA)); got != "10.0.0.9" {
+		t.Errorf("falls back to broader wildcard: got %s, want 10.0.0.9", got)
+	}
+	if got := only(answerRecords(recs, "x.app.test.", dns.TypeAAAA)); got != "2001:db8::1" {
+		t.Errorf("wildcard honors qtype: got %s, want 2001:db8::1", got)
+	}
+}
+
+func TestAnswerRecordsWildcardExcludesParent(t *testing.T) {
+	recs := []store.Record{{Type: "A", Name: "*.app.test.", Value: "10.0.0.1"}}
+	if rs := answerRecords(recs, "app.test.", dns.TypeA); len(rs) != 0 {
+		t.Errorf("wildcard must not answer its parent name, got %v", rs)
+	}
+	if rs := answerRecords(recs, "x.app.test.", dns.TypeA); len(rs) != 1 {
+		t.Errorf("wildcard should answer a child, got %v", rs)
+	}
+}
+
+func TestAnswerRecordsCatchAll(t *testing.T) {
+	recs := []store.Record{{Type: "A", Name: "*.", Value: "127.0.0.1"}}
+	rs := answerRecords(recs, "anything.example.org.", dns.TypeA)
+	if len(rs) != 1 || rs[0].Value != "127.0.0.1" {
+		t.Errorf(`"*." should match everything, got %v`, rs)
+	}
+}
+
 func TestBuildRRValid(t *testing.T) {
 	const q = "rec.example.com."
 	cases := []struct {

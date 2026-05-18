@@ -86,7 +86,7 @@ type createRecord struct {
 func newCreateRecord() createRecord {
 	name := textinput.New()
 	name.CharLimit = 253
-	name.Placeholder = "full name, e.g. www.example.com. or example.com."
+	name.Placeholder = "name, e.g. www.example.com. or *.app.test."
 
 	value := textinput.New()
 	value.CharLimit = 512
@@ -266,6 +266,8 @@ func (m createRecord) View() string {
 		b.WriteString("\n\n")
 		b.WriteString("Name (fully-qualified)\n")
 		b.WriteString(m.name.View())
+		b.WriteString("\n\n")
+		b.WriteString(m.st.desc.Render("Tip: a leading *. makes a wildcard, e.g. *.app.test."))
 
 	case stepEnterValue:
 		b.WriteString(m.st.subtitle.Render("Type: "))
