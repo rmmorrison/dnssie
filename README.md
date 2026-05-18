@@ -108,6 +108,17 @@ editing a record to use the default (300); set it explicitly — including `0`
 — to test client/resolver caching behavior. Records created by older versions
 have no stored TTL and keep using the default.
 
+### Erratic mode (fault injection)
+
+Any record can be made deliberately flaky to test how your app copes with a
+misbehaving resolver. Editing a record (from **Manage existing records**) ends
+with an *erratic mode* prompt: enter a percentage `1–100` and that share of
+matching queries will return `SERVFAIL` instead of the real answer; leave it
+blank (or `0`) to keep the record reliable. Only names with a matching local
+record are affected — forwarded queries are never failed. The records table
+shows the rate in its `FAIL%` column, and an injected failure is logged as
+`erratic` in the live lookups on the **DNS server** screen.
+
 ## Configuration
 
 `dnssie` manages everything through the UI; you don't need to edit files by

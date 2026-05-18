@@ -22,6 +22,26 @@ func TestParseTTL(t *testing.T) {
 	}
 }
 
+func TestParseErratic(t *testing.T) {
+	if n, ok := parseErratic(""); !ok || n != 0 {
+		t.Errorf(`parseErratic("") = (%d,%v), want (0,true)`, n, ok)
+	}
+	if n, ok := parseErratic("  "); !ok || n != 0 {
+		t.Errorf(`parseErratic(spaces) = (%d,%v), want (0,true)`, n, ok)
+	}
+	if n, ok := parseErratic("0"); !ok || n != 0 {
+		t.Errorf(`parseErratic("0") = (%d,%v), want (0,true)`, n, ok)
+	}
+	if n, ok := parseErratic("100"); !ok || n != 100 {
+		t.Errorf(`parseErratic("100") = (%d,%v), want (100,true)`, n, ok)
+	}
+	for _, bad := range []string{"-1", "101", "abc", "12.5", "50%"} {
+		if n, ok := parseErratic(bad); ok || n != 0 {
+			t.Errorf("parseErratic(%q) = (%d,%v), want (0,false)", bad, n, ok)
+		}
+	}
+}
+
 func TestTTLSummary(t *testing.T) {
 	if got := ttlSummary(""); got != "default (300)" {
 		t.Errorf(`ttlSummary("") = %q, want "default (300)"`, got)

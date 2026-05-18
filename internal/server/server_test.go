@@ -56,8 +56,11 @@ func runServer(t *testing.T, recDir, cfgDir string) string {
 		t.Fatalf("New: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go func() { _ = srv.Run(ctx) }()
+	done := make(chan struct{})
+	go func() { _ = srv.Run(ctx); close(done) }()
+	// Wait for the server to fully stop before the test's TempDir is removed,
+	// otherwise the query-log writer can still be writing into it.
+	t.Cleanup(func() { cancel(); <-done })
 	select {
 	case <-srv.Ready():
 	case <-time.After(3 * time.Second):
@@ -223,6 +226,64 @@ func TestServerRecordTTL(t *testing.T) {
 			t.Errorf("%s: answer TTL = %d, want %d", c.name, got, c.ttl)
 		}
 	}
+}
+
+func TestServerErraticMode(t *testing.T) {
+	// Off mode isolates the test: a matching record either answers or, in
+	// erratic mode, SERVFAILs — never forwarded.
+	newServer := func(t *testing.T, pct int) string {
+		recDir := t.TempDir()
+		rec := store.Record{Type: "A", Name: "flaky.test.", Value: "192.0.2.1"}
+		if pct > 0 {
+			rec.ErraticPct = ip(pct)
+		}
+		if err := store.New(recDir).Save([]store.Record{rec}); err != nil {
+			t.Fatalf("seed records: %v", err)
+		}
+		cfgDir := t.TempDir()
+		if err := config.New(cfgDir).Save(config.Config{
+			Port:      5353,
+			Resolvers: config.Resolvers{Mode: config.ModeOff},
+		}); err != nil {
+			t.Fatalf("save config: %v", err)
+		}
+		return runServer(t, recDir, cfgDir)
+	}
+
+	t.Run("disabled always answers", func(t *testing.T) {
+		addr := newServer(t, 0)
+		for i := 0; i < 30; i++ {
+			if resp := query(t, addr, "flaky.test", dns.TypeA); resp.Rcode != dns.RcodeSuccess ||
+				len(resp.Answer) != 1 {
+				t.Fatalf("query %d: rcode=%d answers=%d, want a clean answer", i, resp.Rcode, len(resp.Answer))
+			}
+		}
+	})
+
+	t.Run("100 percent always SERVFAILs", func(t *testing.T) {
+		addr := newServer(t, 100)
+		for i := 0; i < 30; i++ {
+			if resp := query(t, addr, "flaky.test", dns.TypeA); resp.Rcode != dns.RcodeServerFailure ||
+				len(resp.Answer) != 0 {
+				t.Fatalf("query %d: rcode=%d answers=%d, want SERVFAIL", i, resp.Rcode, len(resp.Answer))
+			}
+		}
+	})
+
+	t.Run("partial rate fails some and not others", func(t *testing.T) {
+		addr := newServer(t, 50)
+		const n = 300
+		fails := 0
+		for i := 0; i < n; i++ {
+			if query(t, addr, "flaky.test", dns.TypeA).Rcode == dns.RcodeServerFailure {
+				fails++
+			}
+		}
+		// ~50% with generous bounds so the test isn't flaky itself.
+		if fails < n/5 || fails > 4*n/5 {
+			t.Errorf("got %d/%d SERVFAIL at 50%%, want roughly half", fails, n)
+		}
+	})
 }
 
 func TestServerServfailWhenNoUpstreams(t *testing.T) {

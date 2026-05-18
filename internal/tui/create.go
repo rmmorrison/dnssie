@@ -67,6 +67,34 @@ func ttlSummary(s string) string {
 	return "default (" + strconv.FormatUint(uint64(store.DefaultTTL), 10) + ")"
 }
 
+// parseErratic interprets the erratic-mode field: blank (or "0") disables it;
+// otherwise a whole number 0–100, the percentage of matching queries that
+// should fail. Out-of-range or non-numeric input is rejected so a typo can't
+// silently change the failure rate.
+func parseErratic(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 || n > 100 {
+		return 0, false
+	}
+	return n, true
+}
+
+// erraticPtr maps a parsed erratic percentage to the stored representation:
+// nil when off (so it's omitted from records.toml), a pointer otherwise.
+func erraticPtr(pct int) *int {
+	if pct <= 0 {
+		return nil
+	}
+	return &pct
+}
+
+// erraticPlaceholder is the hint shown in erratic-mode inputs.
+var erraticPlaceholder = "0–100, blank = off"
+
 // recordType is a DNS record type the user can create, with an example shown
 // as placeholder text for the value input.
 type recordType struct {

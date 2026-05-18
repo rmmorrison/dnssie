@@ -66,6 +66,7 @@ const (
 	manageEditingName
 	manageEditingValue
 	manageEditingTTL
+	manageEditingErratic
 	manageConfirmDelete
 	manageSaving
 )
@@ -88,25 +89,45 @@ func ttlFieldValue(r store.Record) string {
 	return strconv.FormatUint(uint64(*r.TTL), 10)
 }
 
+// erraticDisplay formats a record's erratic-mode setting for the records
+// table: a quiet dash when off, "<n>%" when fault injection is enabled.
+func erraticDisplay(r store.Record) string {
+	if r.Erratic() <= 0 {
+		return "—"
+	}
+	return strconv.Itoa(r.Erratic()) + "%"
+}
+
+// erraticFieldValue formats a record's erratic percentage for prefilling the
+// edit input: empty when off, the number otherwise.
+func erraticFieldValue(r store.Record) string {
+	if r.Erratic() <= 0 {
+		return ""
+	}
+	return strconv.Itoa(r.Erratic())
+}
+
 // manage is the screen for browsing persisted records. Records are split into
 // one tab per record type; each tab shows its records in a table that can be
 // navigated to edit or (with confirmation) delete the highlighted record.
 type manage struct {
-	step      manageStep
-	records   []store.Record // canonical set as loaded from disk
-	activeTab int            // index into supportedTypes
-	cursor    int            // row within the active tab
-	scroll    int            // top row of the visible table window
-	editIdx   int            // index into records being edited/deleted
-	name      textinput.Model
-	value     textinput.Model
-	ttl       textinput.Model
-	ttlErr    bool
-	loadErr   error
-	opErr     error // error from the last edit/delete save
-	st        styles
-	width     int
-	height    int
+	step       manageStep
+	records    []store.Record // canonical set as loaded from disk
+	activeTab  int            // index into supportedTypes
+	cursor     int            // row within the active tab
+	scroll     int            // top row of the visible table window
+	editIdx    int            // index into records being edited/deleted
+	name       textinput.Model
+	value      textinput.Model
+	ttl        textinput.Model
+	ttlErr     bool
+	erratic    textinput.Model
+	erraticErr bool
+	loadErr    error
+	opErr      error // error from the last edit/delete save
+	st         styles
+	width      int
+	height     int
 }
 
 func newManage() manage {
@@ -120,12 +141,17 @@ func newManage() manage {
 	ttl.CharLimit = 10
 	ttl.Placeholder = ttlPlaceholder
 
+	erratic := textinput.New()
+	erratic.CharLimit = 3
+	erratic.Placeholder = erraticPlaceholder
+
 	return manage{
-		step:  manageLoading,
-		name:  name,
-		value: value,
-		ttl:   ttl,
-		st:    newStyles(true),
+		step:    manageLoading,
+		name:    name,
+		value:   value,
+		ttl:     ttl,
+		erratic: erratic,
+		st:      newStyles(true),
 	}
 }
 
@@ -230,6 +256,7 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 		m.name.SetWidth(w)
 		m.value.SetWidth(w)
 		m.ttl.SetWidth(w)
+		m.erratic.SetWidth(w)
 		return m, nil
 
 	case themeMsg:
@@ -269,6 +296,8 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 			return m.updateEditValue(msg)
 		case manageEditingTTL:
 			return m.updateEditTTL(msg)
+		case manageEditingErratic:
+			return m.updateEditErratic(msg)
 		case manageConfirmDelete:
 			return m.updateConfirmDelete(msg)
 		case manageLoading, manageSaving:
@@ -288,6 +317,8 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 		m.value, cmd = m.value.Update(msg)
 	case manageEditingTTL:
 		m.ttl, cmd = m.ttl.Update(msg)
+	case manageEditingErratic:
+		m.erratic, cmd = m.erratic.Update(msg)
 	}
 	return m, cmd
 }
@@ -425,27 +456,64 @@ func (m manage) updateEditTTL(msg tea.KeyPressMsg) (manage, tea.Cmd) {
 		m.step = manageEditingValue
 		return m, m.value.Focus()
 	case "enter":
-		ttl, ok := parseTTL(m.ttl.Value())
-		if !ok {
+		if _, ok := parseTTL(m.ttl.Value()); !ok {
 			m.ttlErr = true
 			return m, nil
 		}
-		if _, ok := m.editTarget(); !ok {
+		rec, ok := m.editTarget()
+		if !ok {
 			m.ttl.Blur()
 			m.step = manageBrowsing
 			return m, nil
 		}
 		m.ttl.Blur()
 		m.ttlErr = false
+		m.erratic.SetValue(erraticFieldValue(rec))
+		m.erratic.CursorEnd()
+		m.erraticErr = false
+		m.step = manageEditingErratic
+		return m, m.erratic.Focus()
+	}
+
+	var cmd tea.Cmd
+	m.ttl, cmd = m.ttl.Update(msg)
+	return m, cmd
+}
+
+func (m manage) updateEditErratic(msg tea.KeyPressMsg) (manage, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		// Step back to the TTL field.
+		m.erratic.Blur()
+		m.erraticErr = false
+		m.step = manageEditingTTL
+		return m, m.ttl.Focus()
+	case "enter":
+		pct, ok := parseErratic(m.erratic.Value())
+		if !ok {
+			m.erraticErr = true
+			return m, nil
+		}
+		ttl, _ := parseTTL(m.ttl.Value()) // already validated at the TTL step
+		if _, ok := m.editTarget(); !ok {
+			m.erratic.Blur()
+			m.step = manageBrowsing
+			return m, nil
+		}
+		m.erratic.Blur()
+		m.erraticErr = false
 		m.records[m.editIdx].Name = fqdn(m.name.Value())
 		m.records[m.editIdx].Value = m.value.Value()
 		m.records[m.editIdx].TTL = ttl
+		m.records[m.editIdx].ErraticPct = erraticPtr(pct)
 		m.step = manageSaving
 		return m, saveRecordsCmd(m.records)
 	}
 
 	var cmd tea.Cmd
-	m.ttl, cmd = m.ttl.Update(msg)
+	m.erratic, cmd = m.erratic.Update(msg)
 	return m, cmd
 }
 
@@ -537,13 +605,13 @@ func (m manage) recordsTable(width int, window []int, sel int) string {
 	rows := make([][]string, len(window))
 	for i, idx := range window {
 		r := m.records[idx]
-		rows[i] = []string{r.Name, r.Value, ttlDisplay(r)}
+		rows[i] = []string{r.Name, r.Value, ttlDisplay(r), erraticDisplay(r)}
 	}
 
 	return table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(m.st.accent)).
-		Headers("NAME", "VALUE", "TTL").
+		Headers("NAME", "VALUE", "TTL", "FAIL%").
 		Width(width).
 		Rows(rows...).
 		StyleFunc(func(row, _ int) lipgloss.Style {
@@ -620,11 +688,27 @@ func (m manage) View() string {
 		}
 		return b.String()
 
+	case manageEditingErratic:
+		rec, _ := m.editTarget()
+		b.WriteString(m.st.subtitle.Render("Editing "))
+		b.WriteString(m.st.selected.Render(rec.Type))
+		b.WriteString(m.st.subtitle.Render(" record   Name: "))
+		b.WriteString(m.name.Value())
+		b.WriteString("\n\n")
+		b.WriteString("Erratic mode — % of matching queries to fail with SERVFAIL\n")
+		b.WriteString(m.erratic.View())
+		if m.erraticErr {
+			b.WriteString("\n\n")
+			b.WriteString(m.st.danger.Render("Enter a whole number 0–100 (or blank to turn erratic mode off)."))
+		}
+		return b.String()
+
 	case manageConfirmDelete:
 		rec, _ := m.editTarget()
 		b.WriteString(m.st.danger.Render("Delete this record? This cannot be undone."))
 		b.WriteString("\n\n")
-		b.WriteString(fmt.Sprintf("  %s  %s  %s  TTL %s", rec.Type, rec.Name, rec.Value, ttlDisplay(rec)))
+		b.WriteString(fmt.Sprintf("  %s  %s  %s  TTL %s  fail %s",
+			rec.Type, rec.Name, rec.Value, ttlDisplay(rec), erraticDisplay(rec)))
 		return b.String()
 	}
 
@@ -683,7 +767,9 @@ func (m manage) footer() string {
 	case manageEditingValue:
 		return "enter continue · esc change name"
 	case manageEditingTTL:
-		return "enter save · esc change value"
+		return "enter continue · esc change value"
+	case manageEditingErratic:
+		return "enter save · esc change TTL"
 	case manageConfirmDelete:
 		return "enter delete · esc cancel"
 	}

@@ -241,7 +241,12 @@ func TestEditUpdatesSelectedRecord(t *testing.T) {
 	}
 
 	m.ttl.SetValue("75")
-	m, cmd := m.updateEditTTL(key("enter"))
+	m, _ = m.updateEditTTL(key("enter"))
+	if m.step != manageEditingErratic {
+		t.Fatalf("step = %v, want manageEditingErratic", m.step)
+	}
+
+	m, cmd := m.updateEditErratic(key("enter")) // blank -> erratic off
 	if m.step != manageSaving {
 		t.Fatalf("step = %v, want manageSaving", m.step)
 	}
@@ -254,6 +259,9 @@ func TestEditUpdatesSelectedRecord(t *testing.T) {
 	}
 	if got.TTL == nil || *got.TTL != 75 {
 		t.Errorf("record TTL = %v, want 75", got.TTL)
+	}
+	if got.Erratic() != 0 {
+		t.Errorf("record erratic = %d, want 0 (blank)", got.Erratic())
 	}
 }
 
@@ -281,11 +289,50 @@ func TestEditTTLBlankMeansDefault(t *testing.T) {
 	// Clearing it means "use the default" (nil, not 0).
 	m.ttl.SetValue("")
 	m, _ = m.updateEditTTL(key("enter"))
+	if m.step != manageEditingErratic {
+		t.Fatalf("step = %v, want manageEditingErratic", m.step)
+	}
+	m, _ = m.updateEditErratic(key("enter")) // leave erratic off
 	if m.step != manageSaving {
 		t.Fatalf("step = %v, want manageSaving", m.step)
 	}
 	if m.records[idx].TTL != nil {
 		t.Errorf("TTL = %d, want nil (default)", *m.records[idx].TTL)
+	}
+}
+
+func TestEditErraticPercent(t *testing.T) {
+	m := browsing([]store.Record{
+		{Type: "A", Name: "a.example.com.", Value: "1.1.1.1"},
+	})
+	idx, _ := m.selected()
+
+	m, _ = m.updateBrowsing(key("e"))
+	m, _ = m.updateEditName(key("enter"))
+	m, _ = m.updateEditValue(key("enter"))
+	if m.step != manageEditingTTL {
+		t.Fatalf("step = %v, want manageEditingTTL", m.step)
+	}
+	m, _ = m.updateEditTTL(key("enter")) // default TTL
+	if m.step != manageEditingErratic {
+		t.Fatalf("step = %v, want manageEditingErratic", m.step)
+	}
+
+	// Out-of-range input is rejected and keeps the step.
+	m.erratic.SetValue("150")
+	m, _ = m.updateEditErratic(key("enter"))
+	if m.step != manageEditingErratic || !m.erraticErr {
+		t.Fatalf("invalid erratic: step=%v erraticErr=%v, want manageEditingErratic/true", m.step, m.erraticErr)
+	}
+
+	// A valid percentage is stored.
+	m.erratic.SetValue("40")
+	m, _ = m.updateEditErratic(key("enter"))
+	if m.step != manageSaving {
+		t.Fatalf("step = %v, want manageSaving", m.step)
+	}
+	if m.records[idx].Erratic() != 40 {
+		t.Errorf("erratic = %d, want 40", m.records[idx].Erratic())
 	}
 }
 
@@ -340,7 +387,7 @@ func TestViewPopulatedTabShowsTable(t *testing.T) {
 		{Type: "A", Name: "app.test.", Value: "127.0.0.1"},
 	})
 	out := m.View()
-	for _, want := range []string{"Manage records", "NAME", "VALUE", "TTL", "app.test.", "127.0.0.1", "default"} {
+	for _, want := range []string{"Manage records", "NAME", "VALUE", "TTL", "FAIL%", "app.test.", "127.0.0.1", "default"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q\n%s", want, out)
 		}

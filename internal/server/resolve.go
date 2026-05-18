@@ -105,6 +105,25 @@ func answerRecords(recs []store.Record, qname string, qtype uint16) []store.Reco
 	return wild
 }
 
+// maxErraticPct returns the highest fault-injection percentage among recs,
+// clamped to [0,100]. 0 means no fault injection. When several records answer
+// the same query, the most erratic one sets the failure rate for that name.
+func maxErraticPct(recs []store.Record) int {
+	m := 0
+	for _, r := range recs {
+		if p := r.Erratic(); p > m {
+			m = p
+		}
+	}
+	if m > 100 {
+		return 100
+	}
+	if m < 0 {
+		return 0
+	}
+	return m
+}
+
 // buildRR converts a stored record into a dns.RR for the question. A
 // malformed value yields nil so the record is simply treated as non-matching
 // rather than crashing the server.

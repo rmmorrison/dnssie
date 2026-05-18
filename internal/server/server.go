@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"net"
 	"os"
 	"strconv"
@@ -197,13 +198,22 @@ func (s *Server) handle(w dns.ResponseWriter, req *dns.Msg) {
 	outcome := "servfail"
 	defer func() { s.logQuery(q, outcome) }()
 
+	selected := answerRecords(s.recs.snapshot(), qname, q.Qtype)
 	var answers []dns.RR
-	for _, rec := range answerRecords(s.recs.snapshot(), qname, q.Qtype) {
+	for _, rec := range selected {
 		if rr := buildRR(rec, qname, q.Qtype, rec.TTLOr(defaultTTL)); rr != nil {
 			answers = append(answers, rr)
 		}
 	}
 	if len(answers) > 0 {
+		// Erratic mode: a record can ask that a percentage of its otherwise
+		// good answers fail instead, to exercise client resilience.
+		if p := maxErraticPct(selected); p > 0 && rand.IntN(100) < p {
+			m.SetRcode(req, dns.RcodeServerFailure)
+			outcome = "erratic"
+			_ = w.WriteMsg(m)
+			return
+		}
 		m.Answer = answers
 		m.Authoritative = true
 		outcome = "local"

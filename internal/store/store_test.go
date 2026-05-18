@@ -8,6 +8,7 @@ import (
 )
 
 func u32(v uint32) *uint32 { return &v }
+func iptr(v int) *int      { return &v }
 
 func TestLoadMissingFileReturnsEmpty(t *testing.T) {
 	s := New(t.TempDir())
@@ -79,6 +80,37 @@ func TestTTLRoundTrip(t *testing.T) {
 	}
 	if c := strings.Count(string(data), "ttl"); c != 2 {
 		t.Errorf("ttl key count = %d, want 2 (only the explicit records)\n%s", c, data)
+	}
+}
+
+func TestErraticRoundTrip(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Save([]Record{
+		{Type: "A", Name: "a.", Value: "1"},                       // off -> omitted
+		{Type: "A", Name: "b.", Value: "2", ErraticPct: iptr(25)}, // persisted
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := s.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got[0].ErraticPct != nil {
+		t.Errorf("off record round-tripped as %d, want nil", *got[0].ErraticPct)
+	}
+	if got[1].Erratic() != 25 {
+		t.Errorf("erratic record round-tripped as %d, want 25", got[1].Erratic())
+	}
+
+	// An off record must not write an erratic_pct key (clean files, stable
+	// behavior for records that never used the feature).
+	data, err := os.ReadFile(s.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := strings.Count(string(data), "erratic_pct"); c != 1 {
+		t.Errorf("erratic_pct key count = %d, want 1\n%s", c, data)
 	}
 }
 

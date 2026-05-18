@@ -37,6 +37,21 @@ type Record struct {
 	// older versions keep their behavior); a non-nil value — including 0 — is
 	// served verbatim.
 	TTL *uint32 `toml:"ttl,omitempty"`
+	// ErraticPct enables fault injection ("erratic mode"): the percentage
+	// (1–100) of matching queries that fail with SERVFAIL instead of being
+	// answered, for testing how clients cope with flaky DNS. A nil pointer
+	// (the default, omitted from records.toml so non-erratic records stay
+	// clean) means off.
+	ErraticPct *int `toml:"erratic_pct,omitempty"`
+}
+
+// Erratic returns the record's fault-injection percentage, or 0 (off) when
+// it isn't set.
+func (r Record) Erratic() int {
+	if r.ErraticPct == nil {
+		return 0
+	}
+	return *r.ErraticPct
 }
 
 // TTLOr returns the record's configured TTL, or def when it doesn't set one.

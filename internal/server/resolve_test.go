@@ -66,6 +66,28 @@ func TestAnswerRecordsWildcardExcludesParent(t *testing.T) {
 	}
 }
 
+func ip(v int) *int { return &v }
+
+func TestMaxErraticPct(t *testing.T) {
+	if got := maxErraticPct(nil); got != 0 {
+		t.Errorf("maxErraticPct(nil) = %d, want 0", got)
+	}
+	recs := []store.Record{
+		{Type: "A", Name: "a.", Value: "1"},                     // unset -> 0
+		{Type: "A", Name: "a.", Value: "2", ErraticPct: ip(30)}, // highest wins
+		{Type: "A", Name: "a.", Value: "3", ErraticPct: ip(10)},
+	}
+	if got := maxErraticPct(recs); got != 30 {
+		t.Errorf("maxErraticPct = %d, want 30 (the most erratic record)", got)
+	}
+	if got := maxErraticPct([]store.Record{{ErraticPct: ip(250)}}); got != 100 {
+		t.Errorf("maxErraticPct clamps high = %d, want 100", got)
+	}
+	if got := maxErraticPct([]store.Record{{ErraticPct: ip(-5)}}); got != 0 {
+		t.Errorf("maxErraticPct clamps low = %d, want 0", got)
+	}
+}
+
 func TestAnswerRecordsCatchAll(t *testing.T) {
 	recs := []store.Record{{Type: "A", Name: "*.", Value: "127.0.0.1"}}
 	rs := answerRecords(recs, "anything.example.org.", dns.TypeA)
