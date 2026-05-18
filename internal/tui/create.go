@@ -3,16 +3,15 @@ package tui
 import (
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/rmmorrison/dnssie/internal/store"
 )
 
 // recordSavedMsg reports the outcome of persisting a record.
 type recordSavedMsg struct {
-	path string
-	err  error
+	err error
 }
 
 // saveRecordCmd persists r to the default store off the UI goroutine.
@@ -25,7 +24,7 @@ func saveRecordCmd(r store.Record) tea.Cmd {
 		if err := st.Add(r); err != nil {
 			return recordSavedMsg{err: err}
 		}
-		return recordSavedMsg{path: st.Path()}
+		return recordSavedMsg{}
 	}
 }
 
@@ -73,15 +72,14 @@ const (
 // createRecord is the screen for adding a new DNS record: pick a type, name
 // it, then enter the value. Persisting the record isn't wired up yet.
 type createRecord struct {
-	step      createStep
-	cursor    int
-	chosen    recordType
-	name      textinput.Model
-	value     textinput.Model
-	savedPath string
-	saveErr   error
-	width     int
-	height    int
+	step    createStep
+	cursor  int
+	chosen  recordType
+	name    textinput.Model
+	value   textinput.Model
+	saveErr error
+	width   int
+	height  int
 }
 
 func newCreateRecord() createRecord {
@@ -120,7 +118,6 @@ func (m createRecord) Update(msg tea.Msg) (createRecord, tea.Cmd) {
 			m.step = stepEnterValue
 			return m, m.value.Focus()
 		}
-		m.savedPath = msg.path
 		m.step = stepDone
 		return m, nil
 
@@ -300,8 +297,6 @@ func (m createRecord) View() string {
 		b.WriteByte('\n')
 		b.WriteString(subtitleStyle.Render("Value: "))
 		b.WriteString(m.value.Value())
-		b.WriteString("\n\n")
-		b.WriteString(subtitleStyle.Render("Stored in " + m.savedPath))
 		b.WriteString("\n\n")
 		b.WriteString(helpStyle.Render("enter: back to menu"))
 	}
