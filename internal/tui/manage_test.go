@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -35,10 +36,13 @@ func key(s string) tea.KeyPressMsg {
 func browsing(records []store.Record) manage {
 	m := newManage()
 	m.records = records
-	m.rebuildOrder()
+	m.rebuild()
 	m.step = manageBrowsing
 	return m
 }
+
+// tabFor returns the tab index for a record type.
+func tabFor(typ string) int { return typeRank(typ) }
 
 func TestTypeRank(t *testing.T) {
 	if typeRank("A") != 0 {
@@ -52,7 +56,7 @@ func TestTypeRank(t *testing.T) {
 	}
 }
 
-func TestRebuildOrderGroupsAndSorts(t *testing.T) {
+func TestTabIndicesFiltersAndSorts(t *testing.T) {
 	m := browsing([]store.Record{
 		{Type: "TXT", Name: "z.example.com.", Value: "b"},
 		{Type: "A", Name: "b.example.com.", Value: "2"},
@@ -60,35 +64,45 @@ func TestRebuildOrderGroupsAndSorts(t *testing.T) {
 		{Type: "TXT", Name: "z.example.com.", Value: "a"},
 	})
 
-	// Expected: A group first (sorted by name), then TXT (name then value).
-	want := []store.Record{
-		{Type: "A", Name: "a.example.com.", Value: "1"},
-		{Type: "A", Name: "b.example.com.", Value: "2"},
-		{Type: "TXT", Name: "z.example.com.", Value: "a"},
-		{Type: "TXT", Name: "z.example.com.", Value: "b"},
+	// A tab: only A records, sorted by name.
+	m.activeTab = tabFor("A")
+	got := m.tabIndices()
+	if len(got) != 2 {
+		t.Fatalf("A tab has %d records, want 2", len(got))
 	}
-	if len(m.order) != len(want) {
-		t.Fatalf("order has %d entries, want %d", len(m.order), len(want))
+	if m.records[got[0]].Name != "a.example.com." || m.records[got[1]].Name != "b.example.com." {
+		t.Errorf("A tab not sorted by name: %+v", []store.Record{m.records[got[0]], m.records[got[1]]})
 	}
-	for pos, idx := range m.order {
-		if got := m.records[idx]; got != want[pos] {
-			t.Errorf("order[%d] = %+v, want %+v", pos, got, want[pos])
-		}
+
+	// TXT tab: only TXT records, sorted by name then value.
+	m.activeTab = tabFor("TXT")
+	got = m.tabIndices()
+	if len(got) != 2 {
+		t.Fatalf("TXT tab has %d records, want 2", len(got))
+	}
+	if m.records[got[0]].Value != "a" || m.records[got[1]].Value != "b" {
+		t.Errorf("TXT tab not sorted by value: %+v", []store.Record{m.records[got[0]], m.records[got[1]]})
+	}
+
+	// A tab with no records is simply empty, not an error.
+	m.activeTab = tabFor("MX")
+	if got := m.tabIndices(); len(got) != 0 {
+		t.Errorf("MX tab = %v, want empty", got)
 	}
 }
 
-func TestRebuildOrderClampsCursor(t *testing.T) {
+func TestRebuildClampsCursor(t *testing.T) {
 	m := newManage()
 	m.records = []store.Record{{Type: "A", Name: "a.", Value: "1"}}
 	m.cursor = 5
-	m.rebuildOrder()
+	m.rebuild()
 	if m.cursor != 0 {
 		t.Errorf("cursor = %d, want 0 after clamp", m.cursor)
 	}
 
 	m.records = nil
 	m.cursor = 3
-	m.rebuildOrder()
+	m.rebuild()
 	if m.cursor != 0 {
 		t.Errorf("cursor = %d, want 0 for empty records", m.cursor)
 	}
@@ -130,13 +144,39 @@ func TestBrowsingNavigationClamps(t *testing.T) {
 	}
 }
 
+func TestTabNavigationWrapsAndResetsCursor(t *testing.T) {
+	m := browsing([]store.Record{
+		{Type: "A", Name: "a.", Value: "1"},
+		{Type: "A", Name: "b.", Value: "2"},
+		{Type: "TXT", Name: "t.", Value: "x"},
+	})
+	m.cursor = 1
+
+	// Right advances the tab and resets the row cursor.
+	m, _ = m.updateBrowsing(key("right"))
+	if m.activeTab != 1 {
+		t.Errorf("activeTab = %d, want 1 after right", m.activeTab)
+	}
+	if m.cursor != 0 {
+		t.Errorf("cursor = %d, want 0 after switching tabs", m.cursor)
+	}
+
+	// Left from the first tab wraps to the last.
+	m.activeTab = 0
+	m, _ = m.updateBrowsing(key("left"))
+	if m.activeTab != len(supportedTypes)-1 {
+		t.Errorf("activeTab = %d, want %d (wrapped)", m.activeTab, len(supportedTypes)-1)
+	}
+}
+
 func TestDeleteRemovesSelectedAfterConfirm(t *testing.T) {
 	m := browsing([]store.Record{
 		{Type: "A", Name: "a.example.com.", Value: "1"},
 		{Type: "A", Name: "b.example.com.", Value: "2"},
 	})
 	m.cursor = 1
-	target := m.records[m.order[m.cursor]]
+	idx, _ := m.selected()
+	target := m.records[idx]
 
 	m, _ = m.updateBrowsing(key("d"))
 	if m.step != manageConfirmDelete {
@@ -176,7 +216,7 @@ func TestEditUpdatesSelectedRecord(t *testing.T) {
 	m := browsing([]store.Record{
 		{Type: "A", Name: "old.example.com.", Value: "1.1.1.1"},
 	})
-	idx := m.order[m.cursor]
+	idx, _ := m.selected()
 
 	m, _ = m.updateBrowsing(key("e"))
 	if m.step != manageEditingName {
@@ -210,7 +250,7 @@ func TestEditUpdatesSelectedRecord(t *testing.T) {
 func TestEditCancelKeepsRecord(t *testing.T) {
 	original := store.Record{Type: "A", Name: "a.example.com.", Value: "1.1.1.1"}
 	m := browsing([]store.Record{original})
-	idx := m.order[m.cursor]
+	idx, _ := m.selected()
 
 	m, _ = m.updateBrowsing(key("e"))
 	m.name.SetValue("changed.example.com")
@@ -234,8 +274,10 @@ func TestLoadedMessagePopulatesAndSorts(t *testing.T) {
 	if m.step != manageBrowsing {
 		t.Fatalf("step = %v, want manageBrowsing", m.step)
 	}
-	if got := m.records[m.order[0]]; got.Type != "A" {
-		t.Errorf("first ordered record type = %q, want A", got.Type)
+	// Default tab is A; it should hold exactly the one A record.
+	ti := m.tabIndices()
+	if len(ti) != 1 || m.records[ti[0]].Type != "A" {
+		t.Errorf("A tab = %v, want the single A record", ti)
 	}
 }
 
@@ -248,6 +290,33 @@ func TestLoadErrorIsSurfaced(t *testing.T) {
 	}
 	if m.step != manageBrowsing {
 		t.Errorf("step = %v, want manageBrowsing (so the error renders)", m.step)
+	}
+}
+
+func TestViewPopulatedTabShowsTable(t *testing.T) {
+	m := browsing([]store.Record{
+		{Type: "A", Name: "app.test.", Value: "127.0.0.1"},
+	})
+	out := m.View()
+	for _, want := range []string{"Manage records", "NAME", "VALUE", "app.test.", "127.0.0.1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestViewEmptyTabShowsCenteredMessage(t *testing.T) {
+	m := browsing([]store.Record{
+		{Type: "A", Name: "app.test.", Value: "127.0.0.1"},
+	})
+	m.activeTab = tabFor("AAAA") // no AAAA records
+
+	out := m.View()
+	if !strings.Contains(out, "No AAAA records yet.") {
+		t.Errorf("empty tab view missing message\n%s", out)
+	}
+	if got, want := m.footer(), "←/→ tabs · esc back"; got != want {
+		t.Errorf("footer = %q, want %q", got, want)
 	}
 }
 

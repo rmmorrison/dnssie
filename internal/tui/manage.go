@@ -7,6 +7,8 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 
 	"github.com/rmmorrison/dnssie/internal/store"
 )
@@ -45,7 +47,7 @@ func saveRecordsCmd(records []store.Record) tea.Cmd {
 }
 
 // typeRank orders record types the same way the create screen lists them, so
-// the manage view groups them in a familiar order. Unknown types sort last.
+// the manage tabs follow a familiar order. Unknown types sort last.
 func typeRank(t string) int {
 	for i, rt := range supportedTypes {
 		if rt.name == t {
@@ -66,19 +68,49 @@ const (
 	manageSaving
 )
 
-// manage is the screen for browsing persisted records grouped by type, with
-// editing and (confirmed) deletion of the highlighted record.
+// Tab and table styling.
+var (
+	tabStyle = lipgloss.NewStyle().
+			Faint(true).
+			Padding(0, 1)
+
+	activeTabStyle = lipgloss.NewStyle().
+			Bold(true).
+			Padding(0, 1).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(accent)
+
+	tabRuleStyle = lipgloss.NewStyle().Foreground(accent)
+
+	tableHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(accent).
+				Padding(0, 1)
+
+	tableSelectedStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(accent).
+				Padding(0, 1)
+
+	tableCellStyle = lipgloss.NewStyle().Padding(0, 1)
+)
+
+// manage is the screen for browsing persisted records. Records are split into
+// one tab per record type; each tab shows its records in a table that can be
+// navigated to edit or (with confirmation) delete the highlighted record.
 type manage struct {
-	step    manageStep
-	records []store.Record // canonical set as loaded from disk
-	order   []int          // indices into records, grouped by type then name
-	cursor  int            // index into order
-	name    textinput.Model
-	value   textinput.Model
-	loadErr error
-	opErr   error // error from the last edit/delete save
-	width   int
-	height  int
+	step      manageStep
+	records   []store.Record // canonical set as loaded from disk
+	activeTab int            // index into supportedTypes
+	cursor    int            // row within the active tab
+	editIdx   int            // index into records being edited/deleted
+	name      textinput.Model
+	value     textinput.Model
+	loadErr   error
+	opErr     error // error from the last edit/delete save
+	width     int
+	height    int
 }
 
 func newManage() manage {
@@ -99,37 +131,53 @@ func (m manage) Init() tea.Cmd {
 	return loadRecordsCmd()
 }
 
-// rebuildOrder recomputes the grouped display order and clamps the cursor.
-func (m *manage) rebuildOrder() {
-	m.order = make([]int, len(m.records))
-	for i := range m.records {
-		m.order[i] = i
-	}
-	sort.SliceStable(m.order, func(a, b int) bool {
-		ra, rb := m.records[m.order[a]], m.records[m.order[b]]
-		if ra.Type != rb.Type {
-			if tra, trb := typeRank(ra.Type), typeRank(rb.Type); tra != trb {
-				return tra < trb
-			}
-			return ra.Type < rb.Type
+// tabType is the record type shown on the active tab.
+func (m manage) tabType() string {
+	return supportedTypes[m.activeTab].name
+}
+
+// tabIndices returns the indices into m.records belonging to the active tab,
+// sorted by name then value so the table order is stable.
+func (m manage) tabIndices() []int {
+	t := m.tabType()
+	var idx []int
+	for i, r := range m.records {
+		if r.Type == t {
+			idx = append(idx, i)
 		}
+	}
+	sort.SliceStable(idx, func(a, b int) bool {
+		ra, rb := m.records[idx[a]], m.records[idx[b]]
 		if ra.Name != rb.Name {
 			return ra.Name < rb.Name
 		}
 		return ra.Value < rb.Value
 	})
-	if m.cursor >= len(m.order) {
-		m.cursor = max(len(m.order)-1, 0)
+	return idx
+}
+
+// rebuild clamps the cursor to the active tab's row count.
+func (m *manage) rebuild() {
+	n := len(m.tabIndices())
+	if m.cursor >= n {
+		m.cursor = max(n-1, 0)
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
 	}
 }
 
 // selected returns the highlighted record's index into m.records, or false if
-// there is nothing to select.
+// there is nothing to select on the active tab.
 func (m manage) selected() (int, bool) {
-	if m.step == manageLoading || len(m.order) == 0 {
+	if m.step == manageLoading {
 		return 0, false
 	}
-	return m.order[m.cursor], true
+	ti := m.tabIndices()
+	if m.cursor < 0 || m.cursor >= len(ti) {
+		return 0, false
+	}
+	return ti[m.cursor], true
 }
 
 func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
@@ -145,13 +193,13 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 	case recordsLoadedMsg:
 		if msg.err != nil {
 			m.loadErr = msg.err
-			m.records, m.order = nil, nil
+			m.records = nil
 			m.step = manageBrowsing
 			return m, nil
 		}
 		m.loadErr = nil
 		m.records = msg.records
-		m.rebuildOrder()
+		m.rebuild()
 		m.step = manageBrowsing
 		return m, nil
 
@@ -200,12 +248,20 @@ func (m manage) updateBrowsing(msg tea.KeyPressMsg) (manage, tea.Cmd) {
 		return m, tea.Quit
 	case "esc", "q":
 		return m, changeScreen(screenMenu)
+	case "left", "h", "shift+tab":
+		m.activeTab = (m.activeTab - 1 + len(supportedTypes)) % len(supportedTypes)
+		m.cursor = 0
+		m.opErr = nil
+	case "right", "l", "tab":
+		m.activeTab = (m.activeTab + 1) % len(supportedTypes)
+		m.cursor = 0
+		m.opErr = nil
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
 		}
 	case "down", "j":
-		if m.cursor < len(m.order)-1 {
+		if m.cursor < len(m.tabIndices())-1 {
 			m.cursor++
 		}
 	case "e":
@@ -214,19 +270,31 @@ func (m manage) updateBrowsing(msg tea.KeyPressMsg) (manage, tea.Cmd) {
 			return m, nil
 		}
 		m.opErr = nil
+		m.editIdx = idx
 		m.name.SetValue(m.records[idx].Name)
 		m.name.CursorEnd()
 		m.step = manageEditingName
 		return m, m.name.Focus()
 	case "d":
-		if _, ok := m.selected(); !ok {
+		idx, ok := m.selected()
+		if !ok {
 			return m, nil
 		}
 		m.opErr = nil
+		m.editIdx = idx
 		m.step = manageConfirmDelete
 		return m, nil
 	}
 	return m, nil
+}
+
+// editTarget reports the record being edited/deleted, guarding against an
+// index left stale by a concurrent reload.
+func (m manage) editTarget() (store.Record, bool) {
+	if m.editIdx < 0 || m.editIdx >= len(m.records) {
+		return store.Record{}, false
+	}
+	return m.records[m.editIdx], true
 }
 
 func (m manage) updateEditName(msg tea.KeyPressMsg) (manage, tea.Cmd) {
@@ -242,14 +310,14 @@ func (m manage) updateEditName(msg tea.KeyPressMsg) (manage, tea.Cmd) {
 		if strings.TrimSpace(m.name.Value()) == "" {
 			return m, nil
 		}
-		idx, ok := m.selected()
+		rec, ok := m.editTarget()
 		if !ok {
 			m.name.Blur()
 			m.step = manageBrowsing
 			return m, nil
 		}
 		m.name.Blur()
-		m.value.SetValue(m.records[idx].Value)
+		m.value.SetValue(rec.Value)
 		m.value.CursorEnd()
 		m.step = manageEditingValue
 		return m, m.value.Focus()
@@ -273,15 +341,14 @@ func (m manage) updateEditValue(msg tea.KeyPressMsg) (manage, tea.Cmd) {
 		if strings.TrimSpace(m.value.Value()) == "" {
 			return m, nil
 		}
-		idx, ok := m.selected()
-		if !ok {
+		if _, ok := m.editTarget(); !ok {
 			m.value.Blur()
 			m.step = manageBrowsing
 			return m, nil
 		}
 		m.value.Blur()
-		m.records[idx].Name = fqdn(m.name.Value())
-		m.records[idx].Value = m.value.Value()
+		m.records[m.editIdx].Name = fqdn(m.name.Value())
+		m.records[m.editIdx].Value = m.value.Value()
 		m.step = manageSaving
 		return m, saveRecordsCmd(m.records)
 	}
@@ -299,16 +366,107 @@ func (m manage) updateConfirmDelete(msg tea.KeyPressMsg) (manage, tea.Cmd) {
 		m.step = manageBrowsing
 		return m, nil
 	case "enter":
-		idx, ok := m.selected()
-		if !ok {
+		if _, ok := m.editTarget(); !ok {
 			m.step = manageBrowsing
 			return m, nil
 		}
-		m.records = append(m.records[:idx], m.records[idx+1:]...)
+		m.records = append(m.records[:m.editIdx], m.records[m.editIdx+1:]...)
 		m.step = manageSaving
 		return m, saveRecordsCmd(m.records)
 	}
 	return m, nil
+}
+
+// bodyWidth is the usable text width inside the card, after subtracting the
+// rounded border (2) and the box's horizontal padding (4).
+func (m manage) bodyWidth() int {
+	w := contentWidth(m.width) - 6
+	if w < 16 {
+		w = 16
+	}
+	return w
+}
+
+// regionHeight is the stable height reserved for the records area, so the card
+// doesn't resize as the user moves between populated and empty tabs.
+func (m manage) regionHeight() int {
+	if m.height <= 0 {
+		return 10
+	}
+	// Chrome (~8): app padding, card border + padding, footer.
+	// Body header (~5): title, blank, tab strip, rule, blank.
+	h := m.height - 13
+	if h < 4 {
+		h = 4
+	}
+	if h > 24 {
+		h = 24
+	}
+	return h
+}
+
+// tabBar renders the per-type tab strip with a rule beneath it. Tabs with
+// records show a count so populated tabs are discoverable at a glance.
+func (m manage) tabBar(width int) string {
+	counts := make(map[string]int, len(supportedTypes))
+	for _, r := range m.records {
+		counts[r.Type]++
+	}
+
+	cells := make([]string, len(supportedTypes))
+	for i, rt := range supportedTypes {
+		label := rt.name
+		if n := counts[rt.name]; n > 0 {
+			label = fmt.Sprintf("%s·%d", rt.name, n)
+		}
+		if i == m.activeTab {
+			cells[i] = activeTabStyle.Render(label)
+		} else {
+			cells[i] = tabStyle.Render(label)
+		}
+	}
+
+	bar := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
+	rule := tabRuleStyle.Render(strings.Repeat("─", width))
+	return bar + "\n" + rule
+}
+
+// recordsTable renders the active tab's records as a styled table, with the
+// highlighted row standing out.
+func (m manage) recordsTable(width int, ti []int) string {
+	rows := make([][]string, len(ti))
+	for i, idx := range ti {
+		r := m.records[idx]
+		rows[i] = []string{r.Name, r.Value}
+	}
+
+	return table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(lipgloss.NewStyle().Foreground(accent)).
+		Headers("NAME", "VALUE").
+		Width(width).
+		Rows(rows...).
+		StyleFunc(func(row, _ int) lipgloss.Style {
+			switch {
+			case row == table.HeaderRow:
+				return tableHeaderStyle
+			case row == m.cursor:
+				return tableSelectedStyle
+			default:
+				return tableCellStyle
+			}
+		}).
+		Render()
+}
+
+// padBlock grows s to at least h lines so a shorter table (or empty state)
+// still occupies the reserved region; it never truncates a taller block.
+func padBlock(s string, h int) string {
+	n := strings.Count(s, "\n") + 1
+	if n >= h {
+		return s
+	}
+	return s + strings.Repeat("\n", h-n)
 }
 
 func (m manage) View() string {
@@ -327,7 +485,7 @@ func (m manage) View() string {
 		return b.String()
 
 	case manageEditingName:
-		rec := m.records[m.order[m.cursor]]
+		rec, _ := m.editTarget()
 		b.WriteString(subtitleStyle.Render("Editing "))
 		b.WriteString(selectedItemStyle.Render(rec.Type))
 		b.WriteString(subtitleStyle.Render(" record"))
@@ -337,7 +495,7 @@ func (m manage) View() string {
 		return b.String()
 
 	case manageEditingValue:
-		rec := m.records[m.order[m.cursor]]
+		rec, _ := m.editTarget()
 		b.WriteString(subtitleStyle.Render("Editing "))
 		b.WriteString(selectedItemStyle.Render(rec.Type))
 		b.WriteString(subtitleStyle.Render(" record   Name: "))
@@ -348,7 +506,7 @@ func (m manage) View() string {
 		return b.String()
 
 	case manageConfirmDelete:
-		rec := m.records[m.order[m.cursor]]
+		rec, _ := m.editTarget()
 		b.WriteString(errorStyle.Render("Delete this record? This cannot be undone."))
 		b.WriteString("\n\n")
 		b.WriteString(fmt.Sprintf("  %s  %s  %s", rec.Type, rec.Name, rec.Value))
@@ -361,47 +519,25 @@ func (m manage) View() string {
 		return b.String()
 	}
 
+	width := m.bodyWidth()
+	b.WriteString(m.tabBar(width))
+	b.WriteString("\n\n")
+
 	if m.opErr != nil {
 		b.WriteString(errorStyle.Render("Save failed: " + m.opErr.Error()))
 		b.WriteString("\n\n")
 	}
 
-	if len(m.order) == 0 {
-		b.WriteString(subtitleStyle.Render("No records yet — create one from the main menu."))
+	ti := m.tabIndices()
+	if len(ti) == 0 {
+		msg := subtitleStyle.Render(fmt.Sprintf("No %s records yet.", m.tabType())) +
+			"\n" + subtitleStyle.Render("Create one from the main menu.")
+		b.WriteString(lipgloss.Place(width, m.regionHeight(),
+			lipgloss.Center, lipgloss.Center, msg))
 		return b.String()
 	}
 
-	nameWidth := 0
-	for _, r := range m.records {
-		if w := len(r.Name); w > nameWidth {
-			nameWidth = w
-		}
-	}
-	if nameWidth > 40 {
-		nameWidth = 40
-	}
-
-	currentType := ""
-	for pos, idx := range m.order {
-		rec := m.records[idx]
-		if rec.Type != currentType {
-			if currentType != "" {
-				b.WriteByte('\n')
-			}
-			b.WriteString(groupStyle.Render(rec.Type))
-			b.WriteByte('\n')
-			currentType = rec.Type
-		}
-
-		line := fmt.Sprintf("%-*s  %s", nameWidth, rec.Name, rec.Value)
-		if pos == m.cursor {
-			b.WriteString(selectedItemStyle.Render("▌ " + line))
-		} else {
-			b.WriteString(itemStyle.Render("  " + line))
-		}
-		b.WriteByte('\n')
-	}
-
+	b.WriteString(padBlock(m.recordsTable(width, ti), m.regionHeight()))
 	return b.String()
 }
 
@@ -417,8 +553,11 @@ func (m manage) footer() string {
 		return "enter delete · esc cancel"
 	}
 	// manageBrowsing
-	if m.loadErr != nil || len(m.order) == 0 {
+	if m.loadErr != nil {
 		return "esc back"
 	}
-	return "↑/↓ navigate · e edit · d delete · esc back"
+	if len(m.tabIndices()) == 0 {
+		return "←/→ tabs · esc back"
+	}
+	return "←/→ tabs · ↑/↓ navigate · e edit · d delete · esc back"
 }
