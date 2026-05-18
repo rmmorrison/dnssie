@@ -7,8 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// action identifies the choice a user makes on the main menu. Each one will
-// eventually open its own screen; for now they are placeholders.
+// action identifies the choice a user makes on the main menu.
 type action int
 
 const (
@@ -33,8 +32,8 @@ type menu struct {
 	width  int
 	height int
 
-	// selected holds the most recent choice so we can show a placeholder
-	// until the real screens are wired up.
+	// selected holds the most recent choice for screens that aren't built
+	// yet, so we can show a placeholder.
 	selected *menuItem
 }
 
@@ -53,7 +52,7 @@ func (m menu) Init() tea.Cmd {
 	return nil
 }
 
-func (m menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m menu) Update(msg tea.Msg) (menu, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -79,13 +78,16 @@ func (m menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter", " ":
 			choice := m.items[m.cursor]
-			if choice.action == actionQuit {
+			switch choice.action {
+			case actionQuit:
 				return m, tea.Quit
+			case actionCreateRecord:
+				return m, changeScreen(screenCreate)
+			default:
+				// These screens aren't built yet.
+				m.selected = &choice
+				return m, nil
 			}
-			// The real screens aren't built yet, so just record the
-			// choice and show a placeholder.
-			m.selected = &choice
-			return m, nil
 		}
 	}
 
@@ -115,12 +117,9 @@ var (
 
 	helpStyle = lipgloss.NewStyle().
 			Faint(true)
-
-	appStyle = lipgloss.NewStyle().
-			Padding(1, 2)
 )
 
-func (m menu) View() tea.View {
+func (m menu) View() string {
 	var b strings.Builder
 
 	b.WriteString(titleStyle.Render("dnssie"))
@@ -152,7 +151,5 @@ func (m menu) View() tea.View {
 	b.WriteByte('\n')
 	b.WriteString(helpStyle.Render("↑/↓: navigate • enter: select • q: quit"))
 
-	v := tea.NewView(appStyle.Render(b.String()))
-	v.AltScreen = true
-	return v
+	return b.String()
 }

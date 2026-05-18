@@ -7,6 +7,6 @@ import (
 
 // Run starts the dnssie TUI and blocks until the user exits.
 func Run() error {
-	_, err := tea.NewProgram(newMenu()).Run()
+	_, err := tea.NewProgram(newApp()).Run()
 	return err
 }
