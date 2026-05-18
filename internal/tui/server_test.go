@@ -337,6 +337,18 @@ func TestServerRecentLookupsTailWithIndicator(t *testing.T) {
 		t.Errorf("rendered %d lookup rows, want between 1 and budget %d",
 			rows, a.server.bodyBudget())
 	}
+
+	// Most recent first: q79 must appear above an older visible entry, and
+	// the "earlier hidden" indicator sits at the bottom of the list.
+	iNewest := strings.Index(out, "q79.test.")
+	iOlder := strings.Index(out, "q78.test.")
+	iHidden := strings.Index(out, "earlier lookups hidden")
+	if iNewest < 0 || iOlder < 0 || iNewest > iOlder {
+		t.Errorf("expected q79 to render above q78 (descending order):\n%s", out)
+	}
+	if iHidden < iOlder {
+		t.Errorf("'earlier lookups hidden' should be below the entries:\n%s", out)
+	}
 }
 
 func TestServerRecentLookupsGrowWithTerminal(t *testing.T) {

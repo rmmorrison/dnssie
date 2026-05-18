@@ -632,15 +632,17 @@ func (m server) View() string {
 						indicator = true
 					}
 				}
+				// Most recent first: walk the tail window newest -> oldest.
+				win := all[len(all)-show:]
+				w := contentWidth(m.width) - 2
+				for i := len(win) - 1; i >= 0; i-- {
+					b.WriteString("  ")
+					b.WriteString(m.st.subtitle.Render(clip(win[i], w)))
+					b.WriteByte('\n')
+				}
 				if indicator {
 					b.WriteString(m.st.subtitle.Render(fmt.Sprintf(
 						"  ⋮ %d earlier lookups hidden", len(all)-show)))
-					b.WriteByte('\n')
-				}
-				w := contentWidth(m.width) - 2
-				for _, q := range all[len(all)-show:] {
-					b.WriteString("  ")
-					b.WriteString(m.st.subtitle.Render(clip(q, w)))
 					b.WriteByte('\n')
 				}
 			}
