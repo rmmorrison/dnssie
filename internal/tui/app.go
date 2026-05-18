@@ -186,9 +186,24 @@ func (a app) View() tea.View {
 	}
 
 	card := titledBox(a.styles, "dnssie", body, contentWidth(a.width))
-	out := card + "\n" + a.styles.footer.Render(foot)
+	out := a.styles.app.Render(card + "\n" + a.styles.footer.Render(foot))
 
-	v := tea.NewView(a.styles.app.Render(out))
+	// Final safety net: never emit more lines than the terminal has, so a
+	// height mis-estimate can't scroll the frame and corrupt the bottom row.
+	if a.height > 0 {
+		out = clampLines(out, a.height)
+	}
+
+	v := tea.NewView(out)
 	v.AltScreen = true
 	return v
+}
+
+// clampLines truncates s to at most max lines.
+func clampLines(s string, max int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= max {
+		return s
+	}
+	return strings.Join(lines[:max], "\n")
 }

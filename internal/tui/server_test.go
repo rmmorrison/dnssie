@@ -274,9 +274,9 @@ func TestServerSystemResolversMsg(t *testing.T) {
 
 func TestServerBodyBudget(t *testing.T) {
 	cases := map[int]int{
-		0:  16, // no size yet -> default
-		25: 16, // 25 - 9
-		40: 31, // 40 - 9
+		0:  15, // no size yet -> default
+		25: 15, // 25 - 10
+		40: 30, // 40 - 10
 	}
 	for h, want := range cases {
 		m := newServer()
@@ -321,7 +321,7 @@ func TestServerRecentLookupsNeverOverflowTerminal(t *testing.T) {
 }
 
 func TestServerRecentLookupsTailWithIndicator(t *testing.T) {
-	a := runningServerApp(t, 90, 25, 80) // q0..q79
+	a := runningServerApp(t, 90, 40, 80) // q0..q79; tall enough for several rows
 	out := a.server.View()
 
 	if !strings.Contains(out, "q79.test.") {

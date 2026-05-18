@@ -409,20 +409,29 @@ func (m manage) bodyWidth() int {
 	return w
 }
 
-// regionHeight is the stable height reserved for the records area, so the card
-// doesn't resize as the user moves between populated and empty tabs.
+// headerLines is how many body lines precede the records region: the title
+// and its blank, the tab strip, its rule, and the blank after it — plus the
+// two-line error banner when one is shown.
+func (m manage) headerLines() int {
+	n := 5
+	if m.opErr != nil {
+		n += 2
+	}
+	return n
+}
+
+// regionHeight is the stable height reserved for the records area. It leaves
+// the rest of the card (header + chrome) plus a one-line bottom margin within
+// the terminal, so the frame never overruns the screen or resizes per tab.
 func (m manage) regionHeight() int {
 	if m.height <= 0 {
 		return 10
 	}
-	// Chrome (~8): app padding, card border + padding, footer.
-	// Body header (~5): title, blank, tab strip, rule, blank.
-	h := m.height - 13
-	if h < 4 {
-		h = 4
-	}
-	if h > 24 {
-		h = 24
+	// Chrome (8): app padding, card border + padding, footer.
+	// + 1 safety margin so the frame never reaches the last terminal row.
+	h := m.height - 8 - 1 - m.headerLines()
+	if h < 3 {
+		h = 3
 	}
 	return h
 }

@@ -652,15 +652,15 @@ func (m server) View() string {
 	return b.String()
 }
 
-// bodyBudget is the maximum number of lines the screen body may use before
-// the surrounding chrome (card border/padding, footer, app padding ≈ 8 lines,
-// plus a one-line safety margin) would push content past the bottom of the
-// terminal.
+// bodyBudget is the maximum number of lines the screen body may use. It leaves
+// room for the surrounding chrome (card border/padding, footer, app padding =
+// 9 lines) plus a one-line bottom margin so the frame never reaches the last
+// terminal row.
 func (m server) bodyBudget() int {
 	if m.height <= 0 {
-		return 16 // sensible default before the first WindowSizeMsg
+		return 15 // sensible default before the first WindowSizeMsg
 	}
-	return m.height - 9
+	return m.height - 10
 }
 
 // clip truncates s to at most w display columns, adding an ellipsis when cut.
