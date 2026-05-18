@@ -15,16 +15,47 @@ not built to be exposed to a network. Use it on `localhost` while you work.
 
 ## Requirements
 
-- Go 1.26 or newer (to build/install).
-- macOS or Linux. Windows is supported on a best-effort basis.
+`dnssie` ships as a single self-contained binary — there's nothing to install
+alongside it.
+
+- A 64-bit Linux, macOS, or Windows machine (amd64 or arm64).
+- Go 1.26 or newer **only if** you build from source.
+
+Windows is supported on a best-effort basis.
 
 ## Install
+
+### Download a release (recommended)
+
+Download the archive for your platform from the
+[Releases page](https://github.com/rmmorrison/dnssie/releases), extract it, and
+move the `dnssie` binary somewhere on your `PATH`. No Go toolchain required.
+
+```sh
+# Example: macOS on Apple silicon
+tar -xzf dnssie_0.1.0_darwin_arm64.tar.gz
+sudo mv dnssie /usr/local/bin/
+dnssie version
+```
+
+Linux/macOS archives are `.tar.gz`; Windows archives are `.zip` (extract and
+run `dnssie.exe`). Every release also publishes `checksums.txt` so you can
+verify your download.
+
+The macOS binary isn't notarized, so the first launch may be blocked by
+Gatekeeper. Clear the quarantine flag with
+`xattr -d com.apple.quarantine ./dnssie`, or right-click the binary and choose
+**Open**.
+
+### Build from source
+
+Requires Go 1.26+:
 
 ```sh
 go install github.com/rmmorrison/dnssie/cmd/dnssie@latest
 ```
 
-Or build from a clone:
+Or from a clone:
 
 ```sh
 git clone https://github.com/rmmorrison/dnssie
