@@ -103,6 +103,11 @@ wins over a wildcard, a more specific wildcard wins over a broader one, and a
 wildcard never answers its own parent name (`app.test.` here) — add an
 explicit record for that.
 
+Each record has its own TTL (seconds). Leave it blank when creating or
+editing a record to use the default (300); set it explicitly — including `0`
+— to test client/resolver caching behavior. Records created by older versions
+have no stored TTL and keep using the default.
+
 ## Configuration
 
 `dnssie` manages everything through the UI; you don't need to edit files by

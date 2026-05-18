@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -64,9 +65,28 @@ const (
 	manageBrowsing
 	manageEditingName
 	manageEditingValue
+	manageEditingTTL
 	manageConfirmDelete
 	manageSaving
 )
+
+// ttlDisplay formats a record's TTL for the records table: an explicit value
+// as its number, an unset one as "default".
+func ttlDisplay(r store.Record) string {
+	if r.TTL == nil {
+		return "default"
+	}
+	return strconv.FormatUint(uint64(*r.TTL), 10)
+}
+
+// ttlFieldValue formats a record's TTL for prefilling the edit input: empty
+// when unset (so the placeholder explains the default), the number otherwise.
+func ttlFieldValue(r store.Record) string {
+	if r.TTL == nil {
+		return ""
+	}
+	return strconv.FormatUint(uint64(*r.TTL), 10)
+}
 
 // manage is the screen for browsing persisted records. Records are split into
 // one tab per record type; each tab shows its records in a table that can be
@@ -80,6 +100,8 @@ type manage struct {
 	editIdx   int            // index into records being edited/deleted
 	name      textinput.Model
 	value     textinput.Model
+	ttl       textinput.Model
+	ttlErr    bool
 	loadErr   error
 	opErr     error // error from the last edit/delete save
 	st        styles
@@ -94,10 +116,15 @@ func newManage() manage {
 	value := textinput.New()
 	value.CharLimit = 512
 
+	ttl := textinput.New()
+	ttl.CharLimit = 10
+	ttl.Placeholder = ttlPlaceholder
+
 	return manage{
 		step:  manageLoading,
 		name:  name,
 		value: value,
+		ttl:   ttl,
 		st:    newStyles(true),
 	}
 }
@@ -202,6 +229,7 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 		w := min(msg.Width-8, 60)
 		m.name.SetWidth(w)
 		m.value.SetWidth(w)
+		m.ttl.SetWidth(w)
 		return m, nil
 
 	case themeMsg:
@@ -239,6 +267,8 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 			return m.updateEditName(msg)
 		case manageEditingValue:
 			return m.updateEditValue(msg)
+		case manageEditingTTL:
+			return m.updateEditTTL(msg)
 		case manageConfirmDelete:
 			return m.updateConfirmDelete(msg)
 		case manageLoading, manageSaving:
@@ -256,6 +286,8 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 		m.name, cmd = m.name.Update(msg)
 	case manageEditingValue:
 		m.value, cmd = m.value.Update(msg)
+	case manageEditingTTL:
+		m.ttl, cmd = m.ttl.Update(msg)
 	}
 	return m, cmd
 }
@@ -363,20 +395,57 @@ func (m manage) updateEditValue(msg tea.KeyPressMsg) (manage, tea.Cmd) {
 		if strings.TrimSpace(m.value.Value()) == "" {
 			return m, nil
 		}
-		if _, ok := m.editTarget(); !ok {
+		rec, ok := m.editTarget()
+		if !ok {
 			m.value.Blur()
 			m.step = manageBrowsing
 			return m, nil
 		}
 		m.value.Blur()
+		m.ttl.SetValue(ttlFieldValue(rec))
+		m.ttl.CursorEnd()
+		m.ttlErr = false
+		m.step = manageEditingTTL
+		return m, m.ttl.Focus()
+	}
+
+	var cmd tea.Cmd
+	m.value, cmd = m.value.Update(msg)
+	return m, cmd
+}
+
+func (m manage) updateEditTTL(msg tea.KeyPressMsg) (manage, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		// Step back to the value field.
+		m.ttl.Blur()
+		m.ttlErr = false
+		m.step = manageEditingValue
+		return m, m.value.Focus()
+	case "enter":
+		ttl, ok := parseTTL(m.ttl.Value())
+		if !ok {
+			m.ttlErr = true
+			return m, nil
+		}
+		if _, ok := m.editTarget(); !ok {
+			m.ttl.Blur()
+			m.step = manageBrowsing
+			return m, nil
+		}
+		m.ttl.Blur()
+		m.ttlErr = false
 		m.records[m.editIdx].Name = fqdn(m.name.Value())
 		m.records[m.editIdx].Value = m.value.Value()
+		m.records[m.editIdx].TTL = ttl
 		m.step = manageSaving
 		return m, saveRecordsCmd(m.records)
 	}
 
 	var cmd tea.Cmd
-	m.value, cmd = m.value.Update(msg)
+	m.ttl, cmd = m.ttl.Update(msg)
 	return m, cmd
 }
 
@@ -468,13 +537,13 @@ func (m manage) recordsTable(width int, window []int, sel int) string {
 	rows := make([][]string, len(window))
 	for i, idx := range window {
 		r := m.records[idx]
-		rows[i] = []string{r.Name, r.Value}
+		rows[i] = []string{r.Name, r.Value, ttlDisplay(r)}
 	}
 
 	return table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(m.st.accent)).
-		Headers("NAME", "VALUE").
+		Headers("NAME", "VALUE", "TTL").
 		Width(width).
 		Rows(rows...).
 		StyleFunc(func(row, _ int) lipgloss.Style {
@@ -536,11 +605,26 @@ func (m manage) View() string {
 		b.WriteString(m.value.View())
 		return b.String()
 
+	case manageEditingTTL:
+		rec, _ := m.editTarget()
+		b.WriteString(m.st.subtitle.Render("Editing "))
+		b.WriteString(m.st.selected.Render(rec.Type))
+		b.WriteString(m.st.subtitle.Render(" record   Name: "))
+		b.WriteString(m.name.Value())
+		b.WriteString("\n\n")
+		b.WriteString("TTL (seconds)\n")
+		b.WriteString(m.ttl.View())
+		if m.ttlErr {
+			b.WriteString("\n\n")
+			b.WriteString(m.st.danger.Render("TTL must be a whole number of seconds (or blank for the default)."))
+		}
+		return b.String()
+
 	case manageConfirmDelete:
 		rec, _ := m.editTarget()
 		b.WriteString(m.st.danger.Render("Delete this record? This cannot be undone."))
 		b.WriteString("\n\n")
-		b.WriteString(fmt.Sprintf("  %s  %s  %s", rec.Type, rec.Name, rec.Value))
+		b.WriteString(fmt.Sprintf("  %s  %s  %s  TTL %s", rec.Type, rec.Name, rec.Value, ttlDisplay(rec)))
 		return b.String()
 	}
 
@@ -597,7 +681,9 @@ func (m manage) footer() string {
 	case manageEditingName:
 		return "enter continue · esc cancel"
 	case manageEditingValue:
-		return "enter save · esc change name"
+		return "enter continue · esc change name"
+	case manageEditingTTL:
+		return "enter save · esc change value"
 	case manageConfirmDelete:
 		return "enter delete · esc cancel"
 	}

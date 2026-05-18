@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -38,6 +39,34 @@ func fqdn(name string) string {
 	return name + "."
 }
 
+// parseTTL interprets a TTL field. A blank value means "use the default"
+// (nil, valid). Otherwise it must be a non-negative integer that fits a
+// uint32; anything else is rejected so a typo can't silently become 0.
+func parseTTL(s string) (*uint32, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, true
+	}
+	n, err := strconv.ParseUint(s, 10, 32)
+	if err != nil {
+		return nil, false
+	}
+	v := uint32(n)
+	return &v, true
+}
+
+// ttlPlaceholder is the hint shown in TTL inputs across the create/edit flows.
+var ttlPlaceholder = "blank = default (" + strconv.FormatUint(uint64(store.DefaultTTL), 10) + ")"
+
+// ttlSummary formats a TTL field for read-only display: an explicit value as
+// its number, anything blank/invalid as the default.
+func ttlSummary(s string) string {
+	if v, ok := parseTTL(s); ok && v != nil {
+		return strconv.FormatUint(uint64(*v), 10)
+	}
+	return "default (" + strconv.FormatUint(uint64(store.DefaultTTL), 10) + ")"
+}
+
 // recordType is a DNS record type the user can create, with an example shown
 // as placeholder text for the value input.
 type recordType struct {
@@ -65,6 +94,7 @@ const (
 	stepChooseType createStep = iota
 	stepEnterName
 	stepEnterValue
+	stepEnterTTL
 	stepSaving
 	stepDone
 )
@@ -77,6 +107,8 @@ type createRecord struct {
 	chosen  recordType
 	name    textinput.Model
 	value   textinput.Model
+	ttl     textinput.Model
+	ttlErr  bool
 	saveErr error
 	st      styles
 	width   int
@@ -91,10 +123,15 @@ func newCreateRecord() createRecord {
 	value := textinput.New()
 	value.CharLimit = 512
 
+	ttl := textinput.New()
+	ttl.CharLimit = 10
+	ttl.Placeholder = ttlPlaceholder
+
 	return createRecord{
 		step:  stepChooseType,
 		name:  name,
 		value: value,
+		ttl:   ttl,
 		st:    newStyles(true),
 	}
 }
@@ -111,6 +148,7 @@ func (m createRecord) Update(msg tea.Msg) (createRecord, tea.Cmd) {
 		w := min(msg.Width-8, 60)
 		m.name.SetWidth(w)
 		m.value.SetWidth(w)
+		m.ttl.SetWidth(w)
 		return m, nil
 
 	case themeMsg:
@@ -119,10 +157,11 @@ func (m createRecord) Update(msg tea.Msg) (createRecord, tea.Cmd) {
 
 	case recordSavedMsg:
 		if msg.err != nil {
-			// Surface the error and let the user retry from the value step.
+			// Surface the error and let the user retry the save from the TTL
+			// step (the last one before persisting).
 			m.saveErr = msg.err
-			m.step = stepEnterValue
-			return m, m.value.Focus()
+			m.step = stepEnterTTL
+			return m, m.ttl.Focus()
 		}
 		m.step = stepDone
 		return m, nil
@@ -135,6 +174,8 @@ func (m createRecord) Update(msg tea.Msg) (createRecord, tea.Cmd) {
 			return m.updateEnterName(msg)
 		case stepEnterValue:
 			return m.updateEnterValue(msg)
+		case stepEnterTTL:
+			return m.updateEnterTTL(msg)
 		case stepSaving:
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -152,6 +193,8 @@ func (m createRecord) Update(msg tea.Msg) (createRecord, tea.Cmd) {
 		m.name, cmd = m.name.Update(msg)
 	case stepEnterValue:
 		m.value, cmd = m.value.Update(msg)
+	case stepEnterTTL:
+		m.ttl, cmd = m.ttl.Update(msg)
 	}
 	return m, cmd
 }
@@ -218,16 +261,46 @@ func (m createRecord) updateEnterValue(msg tea.KeyPressMsg) (createRecord, tea.C
 		}
 		m.value.Blur()
 		m.saveErr = nil
+		m.step = stepEnterTTL
+		return m, m.ttl.Focus()
+	}
+
+	var cmd tea.Cmd
+	m.value, cmd = m.value.Update(msg)
+	return m, cmd
+}
+
+func (m createRecord) updateEnterTTL(msg tea.KeyPressMsg) (createRecord, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		// Go back to the value field.
+		m.ttl.Blur()
+		m.ttlErr = false
+		m.saveErr = nil
+		m.step = stepEnterValue
+		return m, m.value.Focus()
+	case "enter":
+		ttl, ok := parseTTL(m.ttl.Value())
+		if !ok {
+			m.ttlErr = true
+			return m, nil
+		}
+		m.ttl.Blur()
+		m.ttlErr = false
+		m.saveErr = nil
 		m.step = stepSaving
 		return m, saveRecordCmd(store.Record{
 			Type:  m.chosen.name,
 			Name:  fqdn(m.name.Value()),
 			Value: m.value.Value(),
+			TTL:   ttl,
 		})
 	}
 
 	var cmd tea.Cmd
-	m.value, cmd = m.value.Update(msg)
+	m.ttl, cmd = m.ttl.Update(msg)
 	return m, cmd
 }
 
@@ -277,6 +350,19 @@ func (m createRecord) View() string {
 		b.WriteString("\n\n")
 		b.WriteString("Value\n")
 		b.WriteString(m.value.View())
+
+	case stepEnterTTL:
+		b.WriteString(m.st.subtitle.Render("Type: "))
+		b.WriteString(m.st.selected.Render(m.chosen.name))
+		b.WriteString(m.st.subtitle.Render("   Name: "))
+		b.WriteString(m.name.Value())
+		b.WriteString("\n\n")
+		b.WriteString("TTL (seconds)\n")
+		b.WriteString(m.ttl.View())
+		if m.ttlErr {
+			b.WriteString("\n\n")
+			b.WriteString(m.st.danger.Render("TTL must be a whole number of seconds (or blank for the default)."))
+		}
 		if m.saveErr != nil {
 			b.WriteString("\n\n")
 			b.WriteString(m.st.danger.Render("Save failed: " + m.saveErr.Error()))
@@ -296,6 +382,9 @@ func (m createRecord) View() string {
 		b.WriteByte('\n')
 		b.WriteString(m.st.subtitle.Render("Value: "))
 		b.WriteString(m.value.Value())
+		b.WriteByte('\n')
+		b.WriteString(m.st.subtitle.Render("TTL:   "))
+		b.WriteString(ttlSummary(m.ttl.Value()))
 	}
 
 	return b.String()
@@ -308,7 +397,9 @@ func (m createRecord) footer() string {
 	case stepEnterName:
 		return "enter continue · esc change type"
 	case stepEnterValue:
-		return "enter save · esc change name"
+		return "enter continue · esc change name"
+	case stepEnterTTL:
+		return "enter save · esc change value"
 	case stepSaving:
 		return ""
 	case stepDone:

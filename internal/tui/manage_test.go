@@ -235,7 +235,13 @@ func TestEditUpdatesSelectedRecord(t *testing.T) {
 	}
 
 	m.value.SetValue("2.2.2.2")
-	m, cmd := m.updateEditValue(key("enter"))
+	m, _ = m.updateEditValue(key("enter"))
+	if m.step != manageEditingTTL {
+		t.Fatalf("step = %v, want manageEditingTTL", m.step)
+	}
+
+	m.ttl.SetValue("75")
+	m, cmd := m.updateEditTTL(key("enter"))
 	if m.step != manageSaving {
 		t.Fatalf("step = %v, want manageSaving", m.step)
 	}
@@ -245,6 +251,41 @@ func TestEditUpdatesSelectedRecord(t *testing.T) {
 	got := m.records[idx]
 	if got.Name != "new.example.com." || got.Value != "2.2.2.2" || got.Type != "A" {
 		t.Errorf("record = %+v, want name new.example.com. value 2.2.2.2 type A", got)
+	}
+	if got.TTL == nil || *got.TTL != 75 {
+		t.Errorf("record TTL = %v, want 75", got.TTL)
+	}
+}
+
+func TestEditTTLBlankMeansDefault(t *testing.T) {
+	ttl := uint32(120)
+	m := browsing([]store.Record{
+		{Type: "A", Name: "a.example.com.", Value: "1.1.1.1", TTL: &ttl},
+	})
+	idx, _ := m.selected()
+
+	m, _ = m.updateBrowsing(key("e"))
+	m, _ = m.updateEditName(key("enter"))
+	if m.step != manageEditingValue {
+		t.Fatalf("step = %v, want manageEditingValue", m.step)
+	}
+	m, _ = m.updateEditValue(key("enter"))
+	if m.step != manageEditingTTL {
+		t.Fatalf("step = %v, want manageEditingTTL", m.step)
+	}
+	// The current TTL is prefilled so it can be tweaked rather than retyped.
+	if m.ttl.Value() != "120" {
+		t.Errorf("TTL field = %q, want prefilled 120", m.ttl.Value())
+	}
+
+	// Clearing it means "use the default" (nil, not 0).
+	m.ttl.SetValue("")
+	m, _ = m.updateEditTTL(key("enter"))
+	if m.step != manageSaving {
+		t.Fatalf("step = %v, want manageSaving", m.step)
+	}
+	if m.records[idx].TTL != nil {
+		t.Errorf("TTL = %d, want nil (default)", *m.records[idx].TTL)
 	}
 }
 
@@ -299,7 +340,7 @@ func TestViewPopulatedTabShowsTable(t *testing.T) {
 		{Type: "A", Name: "app.test.", Value: "127.0.0.1"},
 	})
 	out := m.View()
-	for _, want := range []string{"Manage records", "NAME", "VALUE", "app.test.", "127.0.0.1"} {
+	for _, want := range []string{"Manage records", "NAME", "VALUE", "TTL", "app.test.", "127.0.0.1", "default"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q\n%s", want, out)
 		}

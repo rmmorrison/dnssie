@@ -199,7 +199,7 @@ func (s *Server) handle(w dns.ResponseWriter, req *dns.Msg) {
 
 	var answers []dns.RR
 	for _, rec := range answerRecords(s.recs.snapshot(), qname, q.Qtype) {
-		if rr := buildRR(rec, qname, q.Qtype, defaultTTL); rr != nil {
+		if rr := buildRR(rec, qname, q.Qtype, rec.TTLOr(defaultTTL)); rr != nil {
 			answers = append(answers, rr)
 		}
 	}

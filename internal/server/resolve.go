@@ -10,7 +10,9 @@ import (
 	"github.com/rmmorrison/dnssie/internal/store"
 )
 
-const defaultTTL uint32 = 300
+// defaultTTL is served for records that don't set their own. It aliases the
+// shared default so storage and serving never disagree.
+const defaultTTL = store.DefaultTTL
 
 // supportedQType maps the record types dnssie can store to their DNS type
 // codes. It is deliberately limited so we never serve a type the UI can't

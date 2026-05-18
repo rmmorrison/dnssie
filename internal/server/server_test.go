@@ -187,6 +187,44 @@ func TestServerWildcardRecord(t *testing.T) {
 	}
 }
 
+func TestServerRecordTTL(t *testing.T) {
+	custom, zero := uint32(45), uint32(0)
+	recDir := t.TempDir()
+	if err := store.New(recDir).Save([]store.Record{
+		{Type: "A", Name: "default.test.", Value: "192.0.2.1"},              // inherits default
+		{Type: "A", Name: "custom.test.", Value: "192.0.2.2", TTL: &custom}, // explicit 45
+		{Type: "A", Name: "zero.test.", Value: "192.0.2.3", TTL: &zero},     // explicit 0
+	}); err != nil {
+		t.Fatalf("seed records: %v", err)
+	}
+	cfgDir := t.TempDir()
+	if err := config.New(cfgDir).Save(config.Config{
+		Port:      5353,
+		Resolvers: config.Resolvers{Mode: config.ModeOff}, // isolate: no forwarding
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	addr := runServer(t, recDir, cfgDir)
+
+	cases := []struct {
+		name string
+		ttl  uint32
+	}{
+		{"default.test", uint32(store.DefaultTTL)},
+		{"custom.test", 45},
+		{"zero.test", 0},
+	}
+	for _, c := range cases {
+		resp := query(t, addr, c.name, dns.TypeA)
+		if len(resp.Answer) != 1 {
+			t.Fatalf("%s: answers=%d", c.name, len(resp.Answer))
+		}
+		if got := resp.Answer[0].Header().Ttl; got != c.ttl {
+			t.Errorf("%s: answer TTL = %d, want %d", c.name, got, c.ttl)
+		}
+	}
+}
+
 func TestServerServfailWhenNoUpstreams(t *testing.T) {
 	cfgDir := t.TempDir()
 	if err := config.New(cfgDir).Save(config.Config{

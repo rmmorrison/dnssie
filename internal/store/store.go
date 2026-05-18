@@ -22,11 +22,29 @@ import (
 
 const recordsFile = "records.toml"
 
+// DefaultTTL is the time-to-live (seconds) served for records that don't set
+// one of their own. It is the single source of truth for that default; the
+// server and UI both reference it.
+const DefaultTTL uint32 = 300
+
 // Record is a single DNS record managed by dnssie.
 type Record struct {
 	Type  string `toml:"type"`
 	Name  string `toml:"name"`
 	Value string `toml:"value"`
+	// TTL is the record's time-to-live in seconds. A nil pointer means "use
+	// the default" (and is omitted from records.toml, so files written by
+	// older versions keep their behavior); a non-nil value — including 0 — is
+	// served verbatim.
+	TTL *uint32 `toml:"ttl,omitempty"`
+}
+
+// TTLOr returns the record's configured TTL, or def when it doesn't set one.
+func (r Record) TTLOr(def uint32) uint32 {
+	if r.TTL == nil {
+		return def
+	}
+	return *r.TTL
 }
 
 // document is the on-disk shape of records.toml.
