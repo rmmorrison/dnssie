@@ -118,36 +118,32 @@ var (
 	groupStyle = lipgloss.NewStyle().
 			Bold(true).
 			Underline(true)
-
-	helpStyle = lipgloss.NewStyle().
-			Faint(true)
 )
 
 func (m menu) View() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("dnssie"))
-	b.WriteByte('\n')
 	b.WriteString(subtitleStyle.Render("dev-friendly DNS server"))
 	b.WriteString("\n\n")
 
 	for i, item := range m.items {
-		cursor := "  "
-		line := itemStyle.Render(item.title)
-		if i == m.cursor {
-			cursor = selectedItemStyle.Render("> ")
-			line = selectedItemStyle.Render(item.title)
+		if i > 0 {
+			b.WriteByte('\n')
 		}
-		b.WriteString(cursor)
-		b.WriteString(line)
+		if i == m.cursor {
+			b.WriteString(selectedItemStyle.Render("▌ " + item.title))
+		} else {
+			b.WriteString(itemStyle.Render("  " + item.title))
+		}
 		b.WriteByte('\n')
 		b.WriteString("  ")
 		b.WriteString(descStyle.Render(item.desc))
 		b.WriteByte('\n')
 	}
 
-	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render("↑/↓: navigate • enter: select • q: quit"))
-
 	return b.String()
+}
+
+func (m menu) footer() string {
+	return "↑/↓ navigate · enter select · q quit"
 }

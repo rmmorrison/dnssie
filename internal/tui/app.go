@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -23,7 +25,64 @@ func changeScreen(to screen) tea.Cmd {
 	return func() tea.Msg { return changeScreenMsg{to} }
 }
 
-var appStyle = lipgloss.NewStyle().Padding(1, 2)
+// accent is dnssie's primary brand color, used for the frame and title.
+var accent = lipgloss.Color("#7D56F4")
+
+var (
+	appStyle = lipgloss.NewStyle().Padding(1, 2)
+
+	boxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(accent).
+			Padding(1, 2)
+
+	borderInk = lipgloss.NewStyle().Foreground(accent)
+
+	footerStyle = lipgloss.NewStyle().
+			Faint(true).
+			PaddingLeft(2).
+			PaddingTop(1)
+)
+
+const maxContentWidth = 72
+
+// contentWidth is the usable text width inside the card, derived from the
+// terminal width with a sane cap and floor.
+func contentWidth(termWidth int) int {
+	if termWidth <= 0 {
+		return maxContentWidth
+	}
+	w := termWidth - 10 // outer padding + border + inner padding
+	if w > maxContentWidth {
+		w = maxContentWidth
+	}
+	if w < 24 {
+		w = 24
+	}
+	return w
+}
+
+// titledBox renders body inside a rounded border whose top edge carries the
+// given title, e.g. ╭─ dnssie ───────╮.
+func titledBox(title, body string, width int) string {
+	box := boxStyle.Width(width).Render(body)
+	lines := strings.Split(box, "\n")
+	if len(lines) == 0 {
+		return box
+	}
+
+	total := lipgloss.Width(lines[0]) // full rendered top-border width
+	label := titleStyle.Render(" " + title + " ")
+	// Rebuilt line is "╭─"(2) + label + "─"*dashes + "╮"(1), so to keep the
+	// same width as the box: dashes = total - 3 - width(label).
+	dashes := total - 3 - lipgloss.Width(label)
+	if dashes < 0 {
+		dashes = 0
+	}
+	lines[0] = borderInk.Render("╭─") + label +
+		borderInk.Render(strings.Repeat("─", dashes)+"╮")
+	return strings.Join(lines, "\n")
+}
 
 // app is the root model. It owns the active screen and routes messages and
 // window size to the relevant sub-model.
@@ -102,19 +161,22 @@ func (a app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a app) View() tea.View {
-	var content string
+	var body, foot string
 	switch a.screen {
 	case screenMenu:
-		content = a.menu.View()
+		body, foot = a.menu.View(), a.menu.footer()
 	case screenCreate:
-		content = a.create.View()
+		body, foot = a.create.View(), a.create.footer()
 	case screenManage:
-		content = a.manage.View()
+		body, foot = a.manage.View(), a.manage.footer()
 	case screenServer:
-		content = a.server.View()
+		body, foot = a.server.View(), a.server.footer()
 	}
 
-	v := tea.NewView(appStyle.Render(content))
+	card := titledBox("dnssie", body, contentWidth(a.width))
+	out := card + "\n" + footerStyle.Render(foot)
+
+	v := tea.NewView(appStyle.Render(out))
 	v.AltScreen = true
 	return v
 }

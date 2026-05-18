@@ -334,8 +334,6 @@ func (m manage) View() string {
 		b.WriteString("\n\n")
 		b.WriteString("Name (fully-qualified)\n")
 		b.WriteString(m.name.View())
-		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("enter: continue • esc: cancel"))
 		return b.String()
 
 	case manageEditingValue:
@@ -347,24 +345,19 @@ func (m manage) View() string {
 		b.WriteString("\n\n")
 		b.WriteString("Value\n")
 		b.WriteString(m.value.View())
-		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("enter: save • esc: change name"))
 		return b.String()
 
 	case manageConfirmDelete:
 		rec := m.records[m.order[m.cursor]]
 		b.WriteString(errorStyle.Render("Delete this record? This cannot be undone."))
 		b.WriteString("\n\n")
-		b.WriteString(fmt.Sprintf("  %s  %s  %s\n\n", rec.Type, rec.Name, rec.Value))
-		b.WriteString(helpStyle.Render("enter: delete • esc: cancel"))
+		b.WriteString(fmt.Sprintf("  %s  %s  %s", rec.Type, rec.Name, rec.Value))
 		return b.String()
 	}
 
 	// manageBrowsing
 	if m.loadErr != nil {
 		b.WriteString(errorStyle.Render("Failed to load records: " + m.loadErr.Error()))
-		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("esc: back"))
 		return b.String()
 	}
 
@@ -375,8 +368,6 @@ func (m manage) View() string {
 
 	if len(m.order) == 0 {
 		b.WriteString(subtitleStyle.Render("No records yet — create one from the main menu."))
-		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("esc: back"))
 		return b.String()
 	}
 
@@ -404,14 +395,30 @@ func (m manage) View() string {
 
 		line := fmt.Sprintf("%-*s  %s", nameWidth, rec.Name, rec.Value)
 		if pos == m.cursor {
-			b.WriteString(selectedItemStyle.Render("> " + line))
+			b.WriteString(selectedItemStyle.Render("▌ " + line))
 		} else {
 			b.WriteString(itemStyle.Render("  " + line))
 		}
 		b.WriteByte('\n')
 	}
 
-	b.WriteByte('\n')
-	b.WriteString(helpStyle.Render("↑/↓: navigate • e: edit • d: delete • esc: back"))
 	return b.String()
+}
+
+func (m manage) footer() string {
+	switch m.step {
+	case manageLoading, manageSaving:
+		return ""
+	case manageEditingName:
+		return "enter continue · esc cancel"
+	case manageEditingValue:
+		return "enter save · esc change name"
+	case manageConfirmDelete:
+		return "enter delete · esc cancel"
+	}
+	// manageBrowsing
+	if m.loadErr != nil || len(m.order) == 0 {
+		return "esc back"
+	}
+	return "↑/↓ navigate · e edit · d delete · esc back"
 }

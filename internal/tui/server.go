@@ -439,12 +439,10 @@ func (m server) View() string {
 	case serverEditPort:
 		b.WriteString("Listen port\n")
 		b.WriteString(m.input.View())
-		b.WriteString("\n\n")
 		if m.editErr != nil {
-			b.WriteString(errorStyle.Render(m.editErr.Error()))
 			b.WriteString("\n\n")
+			b.WriteString(errorStyle.Render(m.editErr.Error()))
 		}
-		b.WriteString(helpStyle.Render("enter: save • esc: cancel"))
 		return b.String()
 
 	case serverEditUpstream:
@@ -455,21 +453,18 @@ func (m server) View() string {
 		b.WriteString(subtitleStyle.Render(title))
 		b.WriteString("\n\n")
 		b.WriteString(m.input.View())
-		b.WriteString("\n\n")
 		if m.editErr != nil {
-			b.WriteString(errorStyle.Render(m.editErr.Error()))
 			b.WriteString("\n\n")
+			b.WriteString(errorStyle.Render(m.editErr.Error()))
 		}
-		b.WriteString(helpStyle.Render("enter: save • esc: cancel"))
 		return b.String()
 
 	case serverConfirmDelete:
 		b.WriteString(errorStyle.Render("Delete this upstream resolver? This cannot be undone."))
 		b.WriteString("\n\n")
 		if m.upIndex >= 0 && m.upIndex < len(m.cfg.Resolvers.Upstream) {
-			b.WriteString("  " + m.cfg.Resolvers.Upstream[m.upIndex] + "\n\n")
+			b.WriteString("  " + m.cfg.Resolvers.Upstream[m.upIndex])
 		}
-		b.WriteString(helpStyle.Render("enter: delete • esc: cancel"))
 		return b.String()
 	}
 
@@ -534,8 +529,6 @@ func (m server) View() string {
 			b.WriteString(line(focused, up))
 		}
 		b.WriteString(line(m.onAddRow(), subtitleStyle.Render("+ add resolver")))
-		b.WriteByte('\n')
-		b.WriteString(helpStyle.Render("↑/↓: navigate • enter: edit • a: add • d: delete • s: start/stop • esc: back"))
 	} else {
 		b.WriteString(groupStyle.Render("System resolvers"))
 		b.WriteByte('\n')
@@ -552,11 +545,27 @@ func (m server) View() string {
 				b.WriteByte('\n')
 			}
 		}
-		b.WriteByte('\n')
-		b.WriteString(helpStyle.Render("↑/↓: navigate • enter: edit • space: toggle source • s: start/stop • esc: back"))
 	}
 
 	return b.String()
+}
+
+func (m server) footer() string {
+	switch m.step {
+	case serverLoading, serverSaving:
+		return ""
+	case serverEditPort, serverEditUpstream:
+		return "enter save · esc cancel"
+	case serverConfirmDelete:
+		return "enter delete · esc cancel"
+	}
+	if m.loadErr != nil {
+		return "esc back"
+	}
+	if m.manual() {
+		return "↑/↓ navigate · enter edit · a add · d delete · s start/stop · esc back"
+	}
+	return "↑/↓ navigate · enter edit · space toggle source · s start/stop · esc back"
 }
 
 // row renders a "label  value" settings line with a focus marker.
@@ -568,7 +577,7 @@ func row(focused bool, label, value string) string {
 // line renders a single list line with a focus marker.
 func line(focused bool, text string) string {
 	if focused {
-		return selectedItemStyle.Render("> "+text) + "\n"
+		return selectedItemStyle.Render("▌ "+text) + "\n"
 	}
 	return itemStyle.Render("  "+text) + "\n"
 }
