@@ -96,3 +96,7 @@ The UI starts the server for you, but you can also run it directly:
 dnssie serve            # uses your saved configuration
 dnssie serve --port 53  # override the listen port
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

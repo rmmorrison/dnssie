@@ -23,6 +23,14 @@ import (
 	"github.com/rmmorrison/dnssie/internal/tui"
 )
 
+// Build metadata, injected at release time via -ldflags (see .goreleaser.yaml).
+// The defaults apply to `go build`/`go install` and local development.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	if len(os.Args) < 2 {
 		if err := tui.Run(); err != nil {
@@ -36,6 +44,8 @@ func main() {
 		if err := runServe(os.Args[2:]); err != nil {
 			fail(err)
 		}
+	case "version", "-v", "--version":
+		fmt.Printf("dnssie %s (commit %s, built %s)\n", version, commit, date)
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -81,6 +91,7 @@ usage:
   dnssie          launch the TUI
   dnssie serve    run the DNS server in the foreground
                   [--port N]  override the configured listen port
+  dnssie version  print version information
 `)
 }
 
