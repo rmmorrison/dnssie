@@ -78,6 +78,7 @@ type createRecord struct {
 	name    textinput.Model
 	value   textinput.Model
 	saveErr error
+	st      styles
 	width   int
 	height  int
 }
@@ -94,6 +95,7 @@ func newCreateRecord() createRecord {
 		step:  stepChooseType,
 		name:  name,
 		value: value,
+		st:    newStyles(true),
 	}
 }
 
@@ -109,6 +111,10 @@ func (m createRecord) Update(msg tea.Msg) (createRecord, tea.Cmd) {
 		w := min(msg.Width-8, 60)
 		m.name.SetWidth(w)
 		m.value.SetWidth(w)
+		return m, nil
+
+	case themeMsg:
+		m.st = msg.st
 		return m, nil
 
 	case recordSavedMsg:
@@ -238,55 +244,55 @@ func (m createRecord) updateDone(msg tea.KeyPressMsg) (createRecord, tea.Cmd) {
 func (m createRecord) View() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("Create a new record"))
+	b.WriteString(m.st.title.Render("Create a new record"))
 	b.WriteString("\n\n")
 
 	switch m.step {
 	case stepChooseType:
-		b.WriteString(subtitleStyle.Render("Choose a record type"))
+		b.WriteString(m.st.subtitle.Render("Choose a record type"))
 		b.WriteString("\n\n")
 		for i, rt := range supportedTypes {
 			if i == m.cursor {
-				b.WriteString(selectedItemStyle.Render("▌ " + rt.name))
+				b.WriteString(m.st.selected.Render("▌ " + rt.name))
 			} else {
-				b.WriteString(itemStyle.Render("  " + rt.name))
+				b.WriteString(m.st.item.Render("  " + rt.name))
 			}
 			b.WriteByte('\n')
 		}
 
 	case stepEnterName:
-		b.WriteString(subtitleStyle.Render("Type: "))
-		b.WriteString(selectedItemStyle.Render(m.chosen.name))
+		b.WriteString(m.st.subtitle.Render("Type: "))
+		b.WriteString(m.st.selected.Render(m.chosen.name))
 		b.WriteString("\n\n")
 		b.WriteString("Name (fully-qualified)\n")
 		b.WriteString(m.name.View())
 
 	case stepEnterValue:
-		b.WriteString(subtitleStyle.Render("Type: "))
-		b.WriteString(selectedItemStyle.Render(m.chosen.name))
-		b.WriteString(subtitleStyle.Render("   Name: "))
+		b.WriteString(m.st.subtitle.Render("Type: "))
+		b.WriteString(m.st.selected.Render(m.chosen.name))
+		b.WriteString(m.st.subtitle.Render("   Name: "))
 		b.WriteString(m.name.Value())
 		b.WriteString("\n\n")
 		b.WriteString("Value\n")
 		b.WriteString(m.value.View())
 		if m.saveErr != nil {
 			b.WriteString("\n\n")
-			b.WriteString(errorStyle.Render("Save failed: " + m.saveErr.Error()))
+			b.WriteString(m.st.danger.Render("Save failed: " + m.saveErr.Error()))
 		}
 
 	case stepSaving:
-		b.WriteString(subtitleStyle.Render("Saving record…"))
+		b.WriteString(m.st.subtitle.Render("Saving record…"))
 
 	case stepDone:
-		b.WriteString(statusStyle.Render("Record saved"))
+		b.WriteString(m.st.success.Render("Record saved"))
 		b.WriteString("\n\n")
-		b.WriteString(subtitleStyle.Render("Type:  "))
+		b.WriteString(m.st.subtitle.Render("Type:  "))
 		b.WriteString(m.chosen.name)
 		b.WriteByte('\n')
-		b.WriteString(subtitleStyle.Render("Name:  "))
+		b.WriteString(m.st.subtitle.Render("Name:  "))
 		b.WriteString(m.name.Value())
 		b.WriteByte('\n')
-		b.WriteString(subtitleStyle.Render("Value: "))
+		b.WriteString(m.st.subtitle.Render("Value: "))
 		b.WriteString(m.value.Value())
 	}
 

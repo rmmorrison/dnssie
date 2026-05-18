@@ -144,6 +144,7 @@ type server struct {
 	actionErr     error    // last start/stop failure
 	recentQueries []string // live lookups while the server runs
 
+	st     styles
 	width  int
 	height int
 }
@@ -151,7 +152,7 @@ type server struct {
 func newServer() server {
 	in := textinput.New()
 	in.CharLimit = 64
-	return server{step: serverLoading, input: in}
+	return server{step: serverLoading, input: in, st: newStyles(true)}
 }
 
 func (m server) Init() tea.Cmd {
@@ -200,6 +201,10 @@ func (m server) Update(msg tea.Msg) (server, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(min(msg.Width-8, 60))
+		return m, nil
+
+	case themeMsg:
+		m.st = msg.st
 		return m, nil
 
 	case configLoadedMsg:
@@ -474,15 +479,15 @@ func (m server) updateConfirmDelete(msg tea.KeyPressMsg) (server, tea.Cmd) {
 
 func (m server) View() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("DNS server"))
+	b.WriteString(m.st.title.Render("DNS server"))
 	b.WriteString("\n\n")
 
 	switch m.step {
 	case serverLoading:
-		b.WriteString(subtitleStyle.Render("Loading…"))
+		b.WriteString(m.st.subtitle.Render("Loading…"))
 		return b.String()
 	case serverSaving:
-		b.WriteString(subtitleStyle.Render("Saving…"))
+		b.WriteString(m.st.subtitle.Render("Saving…"))
 		return b.String()
 
 	case serverEditPort:
@@ -490,7 +495,7 @@ func (m server) View() string {
 		b.WriteString(m.input.View())
 		if m.editErr != nil {
 			b.WriteString("\n\n")
-			b.WriteString(errorStyle.Render(m.editErr.Error()))
+			b.WriteString(m.st.danger.Render(m.editErr.Error()))
 		}
 		return b.String()
 
@@ -499,17 +504,17 @@ func (m server) View() string {
 		if m.editingNew {
 			title = "Add upstream resolver"
 		}
-		b.WriteString(subtitleStyle.Render(title))
+		b.WriteString(m.st.subtitle.Render(title))
 		b.WriteString("\n\n")
 		b.WriteString(m.input.View())
 		if m.editErr != nil {
 			b.WriteString("\n\n")
-			b.WriteString(errorStyle.Render(m.editErr.Error()))
+			b.WriteString(m.st.danger.Render(m.editErr.Error()))
 		}
 		return b.String()
 
 	case serverConfirmDelete:
-		b.WriteString(errorStyle.Render("Delete this upstream resolver? This cannot be undone."))
+		b.WriteString(m.st.danger.Render("Delete this upstream resolver? This cannot be undone."))
 		b.WriteString("\n\n")
 		if m.upIndex >= 0 && m.upIndex < len(m.cfg.Resolvers.Upstream) {
 			b.WriteString("  " + m.cfg.Resolvers.Upstream[m.upIndex])
@@ -519,36 +524,36 @@ func (m server) View() string {
 
 	// serverBrowsing
 	if m.loadErr != nil {
-		b.WriteString(errorStyle.Render("Failed to load config: " + m.loadErr.Error()))
+		b.WriteString(m.st.danger.Render("Failed to load config: " + m.loadErr.Error()))
 		b.WriteString("\n\n")
 	}
 	if m.opErr != nil {
-		b.WriteString(errorStyle.Render("Save failed: " + m.opErr.Error()))
+		b.WriteString(m.st.danger.Render("Save failed: " + m.opErr.Error()))
 		b.WriteString("\n\n")
 	}
 
 	// Server status + start/stop control.
 	switch {
 	case m.statusErr != nil:
-		b.WriteString(errorStyle.Render("Status unavailable: " + m.statusErr.Error()))
+		b.WriteString(m.st.danger.Render("Status unavailable: " + m.statusErr.Error()))
 		b.WriteByte('\n')
 	case m.running:
-		b.WriteString(statusStyle.Render("● running") + "  " + m.srvInfo.Addr + "\n")
+		b.WriteString(m.st.success.Render("● running") + "  " + m.srvInfo.Addr + "\n")
 		if !m.srvInfo.Started.IsZero() {
-			b.WriteString(subtitleStyle.Render("  started "+
+			b.WriteString(m.st.subtitle.Render("  started "+
 				m.srvInfo.Started.Format("2006-01-02 15:04:05")) + "\n")
 		}
 	default:
-		b.WriteString(subtitleStyle.Render("○ stopped") + "\n")
+		b.WriteString(m.st.subtitle.Render("○ stopped") + "\n")
 	}
 	if m.busy {
-		b.WriteString(subtitleStyle.Render("  working…") + "\n")
+		b.WriteString(m.st.subtitle.Render("  working…") + "\n")
 	}
 	if m.actionErr != nil {
-		b.WriteString(errorStyle.Render("  "+m.actionErr.Error()) + "\n")
+		b.WriteString(m.st.danger.Render("  "+m.actionErr.Error()) + "\n")
 	}
 	if m.running && m.srvInfo.Port != 0 && m.srvInfo.Port != m.cfg.Port {
-		b.WriteString(errorStyle.Render(fmt.Sprintf(
+		b.WriteString(m.st.danger.Render(fmt.Sprintf(
 			"  ⚠ restart required: running on :%d, config is :%d",
 			m.srvInfo.Port, m.cfg.Port)) + "\n")
 	}
@@ -556,44 +561,44 @@ func (m server) View() string {
 	if m.running {
 		act = "stop"
 	}
-	b.WriteString(itemStyle.Render(fmt.Sprintf("  [ s ] %s server", act)) + "\n\n")
+	b.WriteString(m.st.item.Render(fmt.Sprintf("  [ s ] %s server", act)) + "\n\n")
 
-	b.WriteString(row(m.cursor == focusPort, "Listen port", strconv.Itoa(m.cfg.Port)))
-	b.WriteString(row(m.cursor == focusSource, "Resolver source", m.sourceLabel()))
+	b.WriteString(row(m.st, m.cursor == focusPort, "Listen port", strconv.Itoa(m.cfg.Port)))
+	b.WriteString(row(m.st, m.cursor == focusSource, "Resolver source", m.sourceLabel()))
 	b.WriteByte('\n')
 
 	switch m.cfg.Resolvers.Mode {
 	case config.ModeManual:
-		b.WriteString(groupStyle.Render("Upstream resolvers"))
+		b.WriteString(m.st.group.Render("Upstream resolvers"))
 		b.WriteByte('\n')
 		if len(m.cfg.Resolvers.Upstream) == 0 {
-			b.WriteString(subtitleStyle.Render("  (none yet)"))
+			b.WriteString(m.st.subtitle.Render("  (none yet)"))
 			b.WriteByte('\n')
 		}
 		for i, up := range m.cfg.Resolvers.Upstream {
 			focused := m.cursor == focusFixedCount+i
-			b.WriteString(line(focused, up))
+			b.WriteString(line(m.st, focused, up))
 		}
-		b.WriteString(line(m.onAddRow(), subtitleStyle.Render("+ add resolver")))
+		b.WriteString(line(m.st, m.onAddRow(), m.st.subtitle.Render("+ add resolver")))
 	case config.ModeOff:
-		b.WriteString(groupStyle.Render("Forwarding disabled"))
+		b.WriteString(m.st.group.Render("Forwarding disabled"))
 		b.WriteByte('\n')
-		b.WriteString(subtitleStyle.Render(
+		b.WriteString(m.st.subtitle.Render(
 			"  Unmatched queries return NXDOMAIN; nothing is forwarded."))
 		b.WriteByte('\n')
 	default:
-		b.WriteString(groupStyle.Render("System resolvers"))
+		b.WriteString(m.st.group.Render("System resolvers"))
 		b.WriteByte('\n')
 		switch {
 		case m.sysErr != nil:
-			b.WriteString(subtitleStyle.Render("  Unable to determine system resolvers"))
+			b.WriteString(m.st.subtitle.Render("  Unable to determine system resolvers"))
 			b.WriteByte('\n')
 		case len(m.sysRes) == 0:
-			b.WriteString(subtitleStyle.Render("  (none found)"))
+			b.WriteString(m.st.subtitle.Render("  (none found)"))
 			b.WriteByte('\n')
 		default:
 			for _, r := range m.sysRes {
-				b.WriteString(subtitleStyle.Render("  " + r))
+				b.WriteString(m.st.subtitle.Render("  " + r))
 				b.WriteByte('\n')
 			}
 		}
@@ -601,16 +606,16 @@ func (m server) View() string {
 
 	if m.running {
 		b.WriteByte('\n')
-		b.WriteString(groupStyle.Render("Recent lookups"))
+		b.WriteString(m.st.group.Render("Recent lookups"))
 		b.WriteByte('\n')
 		if len(m.recentQueries) == 0 {
-			b.WriteString(subtitleStyle.Render("  (waiting for queries…)"))
+			b.WriteString(m.st.subtitle.Render("  (waiting for queries…)"))
 			b.WriteByte('\n')
 		} else {
 			w := contentWidth(m.width) - 2
 			for _, q := range m.recentQueries {
 				b.WriteString("  ")
-				b.WriteString(subtitleStyle.Render(clip(q, w)))
+				b.WriteString(m.st.subtitle.Render(clip(q, w)))
 				b.WriteByte('\n')
 			}
 		}
@@ -668,15 +673,15 @@ func (m server) footer() string {
 }
 
 // row renders a "label  value" settings line with a focus marker.
-func row(focused bool, label, value string) string {
+func row(st styles, focused bool, label, value string) string {
 	text := fmt.Sprintf("%-16s %s", label, value)
-	return line(focused, text)
+	return line(st, focused, text)
 }
 
 // line renders a single list line with a focus marker.
-func line(focused bool, text string) string {
+func line(st styles, focused bool, text string) string {
 	if focused {
-		return selectedItemStyle.Render("▌ "+text) + "\n"
+		return st.selected.Render("▌ "+text) + "\n"
 	}
-	return itemStyle.Render("  "+text) + "\n"
+	return st.item.Render("  "+text) + "\n"
 }

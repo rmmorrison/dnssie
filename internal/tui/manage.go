@@ -68,34 +68,6 @@ const (
 	manageSaving
 )
 
-// Tab and table styling.
-var (
-	tabStyle = lipgloss.NewStyle().
-			Faint(true).
-			Padding(0, 1)
-
-	activeTabStyle = lipgloss.NewStyle().
-			Bold(true).
-			Padding(0, 1).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(accent)
-
-	tabRuleStyle = lipgloss.NewStyle().Foreground(accent)
-
-	tableHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(accent).
-				Padding(0, 1)
-
-	tableSelectedStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(accent).
-				Padding(0, 1)
-
-	tableCellStyle = lipgloss.NewStyle().Padding(0, 1)
-)
-
 // manage is the screen for browsing persisted records. Records are split into
 // one tab per record type; each tab shows its records in a table that can be
 // navigated to edit or (with confirmation) delete the highlighted record.
@@ -109,6 +81,7 @@ type manage struct {
 	value     textinput.Model
 	loadErr   error
 	opErr     error // error from the last edit/delete save
+	st        styles
 	width     int
 	height    int
 }
@@ -124,6 +97,7 @@ func newManage() manage {
 		step:  manageLoading,
 		name:  name,
 		value: value,
+		st:    newStyles(true),
 	}
 }
 
@@ -188,6 +162,10 @@ func (m manage) Update(msg tea.Msg) (manage, tea.Cmd) {
 		w := min(msg.Width-8, 60)
 		m.name.SetWidth(w)
 		m.value.SetWidth(w)
+		return m, nil
+
+	case themeMsg:
+		m.st = msg.st
 		return m, nil
 
 	case recordsLoadedMsg:
@@ -420,14 +398,14 @@ func (m manage) tabBar(width int) string {
 			label = fmt.Sprintf("%s·%d", rt.name, n)
 		}
 		if i == m.activeTab {
-			cells[i] = activeTabStyle.Render(label)
+			cells[i] = m.st.activeTab.Render(label)
 		} else {
-			cells[i] = tabStyle.Render(label)
+			cells[i] = m.st.tab.Render(label)
 		}
 	}
 
 	bar := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
-	rule := tabRuleStyle.Render(strings.Repeat("─", width))
+	rule := m.st.tabRule.Render(strings.Repeat("─", width))
 	return bar + "\n" + rule
 }
 
@@ -442,18 +420,18 @@ func (m manage) recordsTable(width int, ti []int) string {
 
 	return table.New().
 		Border(lipgloss.RoundedBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(accent)).
+		BorderStyle(lipgloss.NewStyle().Foreground(m.st.accent)).
 		Headers("NAME", "VALUE").
 		Width(width).
 		Rows(rows...).
 		StyleFunc(func(row, _ int) lipgloss.Style {
 			switch {
 			case row == table.HeaderRow:
-				return tableHeaderStyle
+				return m.st.tableHead
 			case row == m.cursor:
-				return tableSelectedStyle
+				return m.st.tableSel
 			default:
-				return tableCellStyle
+				return m.st.tableCell
 			}
 		}).
 		Render()
@@ -472,23 +450,23 @@ func padBlock(s string, h int) string {
 func (m manage) View() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("Manage records"))
+	b.WriteString(m.st.title.Render("Manage records"))
 	b.WriteString("\n\n")
 
 	switch m.step {
 	case manageLoading:
-		b.WriteString(subtitleStyle.Render("Loading records…"))
+		b.WriteString(m.st.subtitle.Render("Loading records…"))
 		return b.String()
 
 	case manageSaving:
-		b.WriteString(subtitleStyle.Render("Saving…"))
+		b.WriteString(m.st.subtitle.Render("Saving…"))
 		return b.String()
 
 	case manageEditingName:
 		rec, _ := m.editTarget()
-		b.WriteString(subtitleStyle.Render("Editing "))
-		b.WriteString(selectedItemStyle.Render(rec.Type))
-		b.WriteString(subtitleStyle.Render(" record"))
+		b.WriteString(m.st.subtitle.Render("Editing "))
+		b.WriteString(m.st.selected.Render(rec.Type))
+		b.WriteString(m.st.subtitle.Render(" record"))
 		b.WriteString("\n\n")
 		b.WriteString("Name (fully-qualified)\n")
 		b.WriteString(m.name.View())
@@ -496,9 +474,9 @@ func (m manage) View() string {
 
 	case manageEditingValue:
 		rec, _ := m.editTarget()
-		b.WriteString(subtitleStyle.Render("Editing "))
-		b.WriteString(selectedItemStyle.Render(rec.Type))
-		b.WriteString(subtitleStyle.Render(" record   Name: "))
+		b.WriteString(m.st.subtitle.Render("Editing "))
+		b.WriteString(m.st.selected.Render(rec.Type))
+		b.WriteString(m.st.subtitle.Render(" record   Name: "))
 		b.WriteString(m.name.Value())
 		b.WriteString("\n\n")
 		b.WriteString("Value\n")
@@ -507,7 +485,7 @@ func (m manage) View() string {
 
 	case manageConfirmDelete:
 		rec, _ := m.editTarget()
-		b.WriteString(errorStyle.Render("Delete this record? This cannot be undone."))
+		b.WriteString(m.st.danger.Render("Delete this record? This cannot be undone."))
 		b.WriteString("\n\n")
 		b.WriteString(fmt.Sprintf("  %s  %s  %s", rec.Type, rec.Name, rec.Value))
 		return b.String()
@@ -515,7 +493,7 @@ func (m manage) View() string {
 
 	// manageBrowsing
 	if m.loadErr != nil {
-		b.WriteString(errorStyle.Render("Failed to load records: " + m.loadErr.Error()))
+		b.WriteString(m.st.danger.Render("Failed to load records: " + m.loadErr.Error()))
 		return b.String()
 	}
 
@@ -524,14 +502,14 @@ func (m manage) View() string {
 	b.WriteString("\n\n")
 
 	if m.opErr != nil {
-		b.WriteString(errorStyle.Render("Save failed: " + m.opErr.Error()))
+		b.WriteString(m.st.danger.Render("Save failed: " + m.opErr.Error()))
 		b.WriteString("\n\n")
 	}
 
 	ti := m.tabIndices()
 	if len(ti) == 0 {
-		msg := subtitleStyle.Render(fmt.Sprintf("No %s records yet.", m.tabType())) +
-			"\n" + subtitleStyle.Render("Create one from the main menu.")
+		msg := m.st.subtitle.Render(fmt.Sprintf("No %s records yet.", m.tabType())) +
+			"\n" + m.st.subtitle.Render("Create one from the main menu.")
 		b.WriteString(lipgloss.Place(width, m.regionHeight(),
 			lipgloss.Center, lipgloss.Center, msg))
 		return b.String()

@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // action identifies the choice a user makes on the main menu.
@@ -29,12 +28,14 @@ type menuItem struct {
 type menu struct {
 	items  []menuItem
 	cursor int
+	st     styles
 	width  int
 	height int
 }
 
 func newMenu() menu {
 	return menu{
+		st: newStyles(true),
 		items: []menuItem{
 			{actionCreateRecord, "Create a new record", "Add a new DNS record"},
 			{actionManageRecords, "Manage existing records", "View, edit, or delete records"},
@@ -53,6 +54,10 @@ func (m menu) Update(msg tea.Msg) (menu, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+
+	case themeMsg:
+		m.st = msg.st
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -90,40 +95,10 @@ func (m menu) Update(msg tea.Msg) (menu, tea.Cmd) {
 	return m, nil
 }
 
-var (
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#7D56F4"))
-
-	subtitleStyle = lipgloss.NewStyle().
-			Faint(true)
-
-	selectedItemStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("#7D56F4"))
-
-	itemStyle = lipgloss.NewStyle()
-
-	descStyle = lipgloss.NewStyle().
-			Faint(true)
-
-	statusStyle = lipgloss.NewStyle().
-			Italic(true).
-			Foreground(lipgloss.Color("#43BF6D"))
-
-	errorStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#E64545"))
-
-	groupStyle = lipgloss.NewStyle().
-			Bold(true).
-			Underline(true)
-)
-
 func (m menu) View() string {
 	var b strings.Builder
 
-	b.WriteString(subtitleStyle.Render("dev-friendly DNS server"))
+	b.WriteString(m.st.subtitle.Render("dev-friendly DNS server"))
 	b.WriteString("\n\n")
 
 	for i, item := range m.items {
@@ -131,13 +106,13 @@ func (m menu) View() string {
 			b.WriteByte('\n')
 		}
 		if i == m.cursor {
-			b.WriteString(selectedItemStyle.Render("▌ " + item.title))
+			b.WriteString(m.st.selected.Render("▌ " + item.title))
 		} else {
-			b.WriteString(itemStyle.Render("  " + item.title))
+			b.WriteString(m.st.item.Render("  " + item.title))
 		}
 		b.WriteByte('\n')
 		b.WriteString("  ")
-		b.WriteString(descStyle.Render(item.desc))
+		b.WriteString(m.st.desc.Render(item.desc))
 		b.WriteByte('\n')
 	}
 
