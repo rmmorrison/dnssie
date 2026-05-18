@@ -615,10 +615,25 @@ func (m server) footer() string {
 	if m.loadErr != nil {
 		return "esc back"
 	}
-	if m.manual() {
-		return "↑/↓ navigate · enter edit · a add · d delete · s start/stop · esc back"
+
+	// Browsing: tailor the hint to the highlighted row so it only advertises
+	// keys that actually do something there.
+	parts := []string{"↑/↓ navigate"}
+	switch {
+	case m.cursor == focusPort:
+		parts = append(parts, "enter edit port")
+	case m.cursor == focusSource:
+		parts = append(parts, "space toggle source")
+	case m.onAddRow():
+		parts = append(parts, "enter add resolver")
+	default: // an upstream entry (manual mode)
+		parts = append(parts, "enter edit", "d delete")
 	}
-	return "↑/↓ navigate · enter edit · space toggle source · s start/stop · esc back"
+	if m.manual() && !m.onAddRow() {
+		parts = append(parts, "a add")
+	}
+	parts = append(parts, "s start/stop", "esc back")
+	return strings.Join(parts, " · ")
 }
 
 // row renders a "label  value" settings line with a focus marker.
