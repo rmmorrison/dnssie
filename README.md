@@ -1,20 +1,25 @@
 # dnssie
 
-A developer-friendly DNS server with a terminal UI for straightforward management.
+A developer-focused DNS server with a terminal UI for straightforward management.
 
-## Why not just edit /etc/hosts?
+<img src="docs/screenshots/main.png" alt="dnssie main menu" width="700">
 
-* It serves real record types (`CNAME`, `MX`, `TXT`, `SOA`, `NS`, `PTR`), not just name-to-IP mappings.
-* It supports wildcards, so `*.app.test.` resolves without listing every subdomain.
-* Names you haven't defined are forwarded to your normal resolvers instead of failing.
-* No root needed: records live in your own config directory, not a system-wide file.
-* Per-record TTLs and an opt-in "erratic mode" let you test client caching and failure handling.
-* It's a real DNS server, so tools and libraries that ignore `/etc/hosts` still see it.
-* A terminal UI manages records and shows lookups live, instead of hand-editing a file.
+## Why not just edit /etc/hosts (or C:\Windows\System32\drivers\etc\hosts)?
+
+`dnssie` is built to do what a simple hosts file can't:
+
+* Serve any record from the most common types (`CNAME`, `MX`, `TXT`, `SOA`, `NS`, `PTR`).
+* Wildcard support for `A` and `AAAA` record types.
+* Rootless: no administrator privileges required by default (unless you want to run the DNS server on port 53, of course).
+* Define per-record TTL values.
+* "Erratic mode": test client caching and failure handling with definable failure percentages on record lookups.
+* TOML-based configuration and storage, safe and suitable for collaboration in git (or your favourite VCS).
 
 ## What this is not
 
-This isn't [dnsmasq](https://thekelleys.org.uk/dnsmasq/doc.html) or [Unbound](https://nlnetlabs.nl/projects/unbound/about/) and it's _definitely_ not your new production DNS server.
+It's not your new production DNS server. Don't expose `dnssie` to the public internet or configure all of your clients to use it.
+
+For actual production needs, stick with the usual suspects: [dnsmasq](https://thekelleys.org.uk/dnsmasq/doc.html) or [Unbound](https://nlnetlabs.nl/projects/unbound/about/).
 
 ## Quick Start
 
@@ -45,6 +50,12 @@ dig @127.0.0.1 -p 1053 app.test
 The server keeps running after you quit the UI — it listens on `127.0.0.1:1053`
 by default. Relaunch `dnssie` to see its status and recent lookups, or to stop
 it.
+
+<img src="docs/screenshots/create.png" alt="Creating a new DNS record" width="700">
+
+<img src="docs/screenshots/manage.png" alt="Managing existing records" width="700">
+
+<img src="docs/screenshots/server.png" alt="DNS server screen" width="700">
 
 ## Build from source
 
