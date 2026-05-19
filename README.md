@@ -2,7 +2,16 @@
 
 A developer-focused DNS server with a terminal UI for straightforward management.
 
-<img src="docs/screenshots/main.png" alt="dnssie main menu" width="700">
+<table>
+  <tr>
+    <td><a href="docs/screenshots/main.png"><img src="docs/screenshots/main.png" alt="Main menu" width="420"></a></td>
+    <td><a href="docs/screenshots/create.png"><img src="docs/screenshots/create.png" alt="Creating a new DNS record" width="420"></a></td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/manage.png"><img src="docs/screenshots/manage.png" alt="Managing existing records" width="420"></a></td>
+    <td><a href="docs/screenshots/server.png"><img src="docs/screenshots/server.png" alt="DNS server screen" width="420"></a></td>
+  </tr>
+</table>
 
 ## Why not just edit /etc/hosts (or C:\Windows\System32\drivers\etc\hosts)?
 
@@ -50,12 +59,6 @@ dig @127.0.0.1 -p 1053 app.test
 The server keeps running after you quit the UI — it listens on `127.0.0.1:1053`
 by default. Relaunch `dnssie` to see its status and recent lookups, or to stop
 it.
-
-<img src="docs/screenshots/create.png" alt="Creating a new DNS record" width="700">
-
-<img src="docs/screenshots/manage.png" alt="Managing existing records" width="700">
-
-<img src="docs/screenshots/server.png" alt="DNS server screen" width="700">
 
 ## Build from source
 
